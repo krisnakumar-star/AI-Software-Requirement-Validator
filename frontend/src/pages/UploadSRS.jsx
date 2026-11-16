@@ -1,6 +1,6 @@
 
 import "./UploadSRS.css";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -18,8 +18,8 @@ import {
   CheckCircle2,
   AlertCircle,
 } from "lucide-react";
+import { apiUrl } from "../config/api";
 
-const API_URL = "http://localhost:8080";
 const MAX_FILE_SIZE = 20 * 1024 * 1024;
 const ALLOWED_EXTENSIONS = [".pdf", ".doc", ".docx", ".txt"];
 
@@ -42,11 +42,7 @@ function UploadSRS() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
 
-  useEffect(() => {
-    fetchProjects();
-  }, []);
-
-  const fetchProjects = async () => {
+  const fetchProjects = useCallback(async () => {
     try {
       const userData = localStorage.getItem("user");
       const token = localStorage.getItem("token");
@@ -72,7 +68,7 @@ function UploadSRS() {
       }
 
       const response = await fetch(
-        `${API_URL}/api/projects/owner/${encodeURIComponent(user.email)}`,
+        apiUrl(`/api/projects/owner/${encodeURIComponent(user.email)}`),
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -114,7 +110,14 @@ function UploadSRS() {
     } finally {
       setLoadingProjects(false);
     }
-  };
+  }, [navigate, searchParams]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void fetchProjects();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchProjects]);
 
   const handleProjectChange = (e) => {
     const selectedId = e.target.value;
@@ -221,7 +224,7 @@ function UploadSRS() {
         formData.append("projectId", projectId);
 
         const response = await fetch(
-          `${API_URL}/api/documents/upload`,
+          apiUrl("/api/documents/upload"),
           {
             method: "POST",
             headers: {
@@ -242,7 +245,7 @@ function UploadSRS() {
         navigate(`/project/${projectId}`);
       } else {
         const response = await fetch(
-          `${API_URL}/api/requirements`,
+          apiUrl("/api/requirements"),
           {
             method: "POST",
             headers: {

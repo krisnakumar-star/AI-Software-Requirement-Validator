@@ -11,6 +11,7 @@ import {
   LoaderCircle,
   CheckCircle2,
 } from "lucide-react";
+import { apiUrl } from "../config/api";
 
 function CreateProject() {
   const navigate = useNavigate();
@@ -61,7 +62,7 @@ function CreateProject() {
     setLoading(true);
 
     try {
-      const response = await fetch("http://localhost:8080/api/projects", {
+      const response = await fetch(apiUrl("/api/projects"), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -9,6 +9,7 @@ import {
   ArrowLeft,
   Sparkles,
 } from "lucide-react";
+import { apiUrl } from "../config/api";
 
 function Register() {
   const navigate = useNavigate();
@@ -31,7 +32,7 @@ function Register() {
 
     try {
       const response = await fetch(
-        "http://localhost:8080/api/auth/register",
+        apiUrl("/api/auth/register"),
         {
           method: "POST",
           headers: {

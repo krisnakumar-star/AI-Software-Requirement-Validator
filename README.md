@@ -90,30 +90,37 @@ The backend's default database URI is:
 mongodb://localhost:27017/requirement_validator
 ```
 
-### 3. Configure the backend
+### 3. Configure and run the AI service
 
-Set the required environment variables before starting Spring Boot:
-
-- `JWT_SECRET` — a strong, randomly generated secret.
-- `LLM_API_URL` — the URL of your running AI service.
-- `SRS_API_KEY` — your language-model API key.
-
-Keep real credentials out of source control.
-
-### 4. Run the backend
-
-From the project root, run:
+Copy `ai-service/.env.example` to `ai-service/.env` if it does not already exist, then set `HF_TOKEN`, `HF_MODEL`, and a private random `SRS_API_KEY`. Choose a model/provider enabled for your Hugging Face account. The service uses `https://router.huggingface.co/v1` and never sends the Hugging Face token to React. Verify model access by submitting a real `/analyze` request.
 
 ```powershell
+cd ai-service
+python -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+uvicorn main:app --host 0.0.0.0 --port 8001
+```
+
+Edit `.env` before relying on analysis. Keep it out of source control.
+
+### 4. Run Spring Boot
+
+In a separate PowerShell terminal, set `LLM_API_KEY` to the same private value as `SRS_API_KEY`. Set `JWT_SECRET` to the existing application's stable secret. Configure `MONGODB_URI` if MongoDB is not using the local default. Never rotate the JWT secret casually because existing sessions depend on it.
+
+```powershell
+$env:LLM_API_URL = "http://localhost:8001"
+$env:LLM_API_KEY = "same-value-as-SRS_API_KEY"
+$env:LLM_API_CONNECT_TIMEOUT = "10000"
+$env:LLM_API_READ_TIMEOUT = "120000"
 cd backend
 .\mvnw.cmd spring-boot:run
 ```
 
-The backend is configured to use port `8080` by default.
+Spring Boot listens on port `8080` by default. The authenticated project analysis endpoint calls FastAPI and stores returned analyses on the existing requirement records.
 
-### 5. Run the frontend
-
-Open a separate terminal:
+### 5. Run React
 
 ```powershell
 cd frontend
@@ -121,11 +128,17 @@ npm install
 npm run dev
 ```
 
-Open the local URL displayed by Vite in your terminal.
+Open the local URL displayed by Vite. React only sends authenticated requests to Spring Boot; it never receives either AI service key.
 
-### 6. Run the Python AI service
+### 6. Start MongoDB
 
-Open another terminal and follow the Python service's dependency and startup instructions. Ensure the service is accessible at the URL configured by `LLM_API_URL`.
+If MongoDB is installed as a Windows service, run PowerShell as an account permitted to start it:
+
+```powershell
+Start-Service MongoDB
+```
+
+The backend uses `mongodb://localhost:27017/requirement_validator` by default. Set `MONGODB_URI` for a different local or hosted database.
 
 ## Security Notes
 

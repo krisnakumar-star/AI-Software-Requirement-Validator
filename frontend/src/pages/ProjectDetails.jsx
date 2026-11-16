@@ -22,8 +22,7 @@ import {
 
 import StatCard from "../components/StatCard";
 import RequirementCard from "../components/RequirementCard";
-
-const API_URL = "http://localhost:8080";
+import { apiUrl } from "../config/api";
 
 function ProjectDetails() {
   const { id } = useParams();
@@ -52,7 +51,7 @@ function ProjectDetails() {
       }
 
       try {
-        const response = await fetch(`${API_URL}/api/projects/${id}`, {
+        const response = await fetch(apiUrl(`/api/projects/${id}`), {
           headers: {
             Authorization: `Bearer ${token}`,
           },
@@ -102,7 +101,7 @@ function ProjectDetails() {
 
       try {
         const response = await fetch(
-          `${API_URL}/api/requirements/project/${id}`,
+          apiUrl(`/api/requirements/project/${id}`),
           {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -162,7 +161,7 @@ function ProjectDetails() {
     setPageError("");
 
     try {
-      const response = await fetch(`${API_URL}/api/projects/${id}`, {
+      const response = await fetch(apiUrl(`/api/projects/${id}`), {
         method: "DELETE",
         headers: {
           Authorization: `Bearer ${token}`,

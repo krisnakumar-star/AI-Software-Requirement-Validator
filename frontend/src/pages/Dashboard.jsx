@@ -20,8 +20,7 @@ import {
 
 import Navbar from "../components/Navbar";
 import Footer from "../components/Footer";
-
-const API_URL = "http://localhost:8080";
+import { apiUrl } from "../config/api";
 
 function Dashboard() {
   const [projects, setProjects] = useState([]);
@@ -29,7 +28,6 @@ function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [statsLoading, setStatsLoading] = useState(true);
   const [error, setError] = useState("");
-  const [refreshKey, setRefreshKey] = useState(0);
 
   const fetchProjects = useCallback(async () => {
     setLoading(true);
@@ -60,7 +58,7 @@ function Dashboard() {
       }
 
       const response = await fetch(
-        `${API_URL}/api/projects/owner/${encodeURIComponent(user.email)}`,
+        apiUrl(`/api/projects/owner/${encodeURIComponent(user.email)}`),
         {
           headers: {
             Authorization: `Bearer ${token}`,
@@ -89,7 +87,7 @@ function Dashboard() {
 
           try {
             const requirementResponse = await fetch(
-              `${API_URL}/api/requirements/project/${encodeURIComponent(projectId)}`,
+              apiUrl(`/api/requirements/project/${encodeURIComponent(projectId)}`),
               {
                 headers: {
                   Authorization: `Bearer ${token}`,
@@ -124,8 +122,11 @@ function Dashboard() {
   }, []);
 
   useEffect(() => {
-    fetchProjects();
-  }, [fetchProjects, refreshKey]);
+    const timer = window.setTimeout(() => {
+      void fetchProjects();
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [fetchProjects]);
 
   const issuesDetected = requirements.filter((requirement) => {
     const hasIssues =
@@ -191,7 +192,10 @@ function Dashboard() {
   ];
 
   const handleRetry = () => {
-    setRefreshKey((current) => current + 1);
+    setLoading(true);
+    setStatsLoading(true);
+    setError("");
+    void fetchProjects();
   };
 
   return (

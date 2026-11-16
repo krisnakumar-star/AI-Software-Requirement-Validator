@@ -1,6 +1,7 @@
 package com.reqvalidator.backend.model;
 
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.mapping.Document;
@@ -41,6 +42,7 @@ public class Requirement {
     // Overall result
     private Integer qualityScore;
     private String status;
+    private Map<String, Object> aiAnalysis;
 
     public Requirement() {
     }
@@ -233,5 +235,13 @@ public class Requirement {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public Map<String, Object> getAiAnalysis() {
+        return aiAnalysis;
+    }
+
+    public void setAiAnalysis(Map<String, Object> aiAnalysis) {
+        this.aiAnalysis = aiAnalysis;
     }
 }

@@ -34,6 +34,16 @@ public class GlobalExceptionHandler {
         );
     }
 
+    @ExceptionHandler(IllegalStateException.class)
+    public ResponseEntity<Map<String, Object>> handleServiceFailure(
+            IllegalStateException exception) {
+
+        return createErrorResponse(
+                HttpStatus.BAD_GATEWAY,
+                exception.getMessage()
+        );
+    }
+
     @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
     public ResponseEntity<Map<String, Object>> handleMethodNotSupported(
             HttpRequestMethodNotSupportedException exception) {

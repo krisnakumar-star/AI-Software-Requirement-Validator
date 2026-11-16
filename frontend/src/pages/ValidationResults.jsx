@@ -11,7 +11,6 @@ import {
   AlertTriangle,
   XCircle,
   Clock3,
-  ChartNoAxesColumn,
   RefreshCw,
   LoaderCircle,
   BrainCircuit,
@@ -20,8 +19,42 @@ import {
   Search,
   ClipboardCheck,
 } from "lucide-react";
+import { apiUrl } from "../config/api";
 
-const API_URL = "http://localhost:8080";
+function isValidAnalysisResponse(data) {
+  if (
+    !data ||
+    !Array.isArray(data.results) ||
+    data.results.length < 1 ||
+    data.total_requirements !== data.results.length
+  ) {
+    return false;
+  }
+
+  return data.results.every((result) => {
+    const analysis = result?.analysis;
+    return (
+      typeof result?.requirement === "string" &&
+      typeof analysis?.quality_score === "number" &&
+      Number.isInteger(analysis.quality_score) &&
+      analysis.quality_score >= 0 &&
+      analysis.quality_score <= 100 &&
+      [
+        "classification",
+        "clarity",
+        "completeness",
+        "testability",
+        "suggested_rewrite",
+        "explanation",
+      ].every((field) => typeof analysis[field] === "string") &&
+      ["ambiguities", "missing_information", "issues"].every(
+        (field) =>
+          Array.isArray(analysis[field]) &&
+          analysis[field].every((item) => typeof item === "string")
+      )
+    );
+  });
+}
 
 function ValidationResults() {
   const navigate = useNavigate();
@@ -59,7 +92,7 @@ function ValidationResults() {
 
       try {
         const validationResponse = await fetch(
-          `${API_URL}/api/validation/project/${encodeURIComponent(projectId)}`,
+          apiUrl(`/api/validation/project/${encodeURIComponent(projectId)}`),
           {
             method: "POST",
             headers: {
@@ -76,7 +109,7 @@ function ValidationResults() {
         }
 
         const summaryResponse = await fetch(
-          `${API_URL}/api/validation/project/${encodeURIComponent(projectId)}/summary`,
+          apiUrl(`/api/validation/project/${encodeURIComponent(projectId)}/summary`),
           {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -91,7 +124,7 @@ function ValidationResults() {
         const summaryData = await summaryResponse.json();
 
         const requirementsResponse = await fetch(
-          `${API_URL}/api/requirements/project/${encodeURIComponent(projectId)}`,
+          apiUrl(`/api/requirements/project/${encodeURIComponent(projectId)}`),
           {
             headers: {
               Authorization: `Bearer ${token}`,
@@ -110,6 +143,19 @@ function ValidationResults() {
           setRequirements(
             Array.isArray(requirementsData) ? requirementsData : []
           );
+          const savedAnalyses = Array.isArray(requirementsData)
+            ? requirementsData.filter((item) => item.aiAnalysis)
+            : [];
+          if (savedAnalyses.length > 0) {
+            setLlmAnalysis({
+              total_requirements: savedAnalyses.length,
+              results: savedAnalyses.map((item) => ({
+                requirement_id: item.requirementId,
+                requirement: item.requirementText,
+                analysis: item.aiAnalysis,
+              })),
+            });
+          }
         }
       } catch (err) {
         console.error("Validation error:", err);
@@ -149,7 +195,7 @@ function ValidationResults() {
 
     try {
       const response = await fetch(
-        `${API_URL}/api/llm/analyze/project/${encodeURIComponent(projectId)}`,
+        apiUrl(`/api/llm/analyze/project/${encodeURIComponent(projectId)}`),
         {
           method: "POST",
           headers: {
@@ -173,6 +219,12 @@ function ValidationResults() {
         );
       }
 
+      if (!isValidAnalysisResponse(data)) {
+        throw new Error(
+          "The AI service returned an incomplete or invalid analysis response. Please retry."
+        );
+      }
+
       setLlmAnalysis(data);
     } catch (err) {
       console.error("AI analysis error:", err);
@@ -186,11 +238,6 @@ function ValidationResults() {
       setLlmLoading(false);
     }
   };
-
-  const formatAttributeName = (name) =>
-    (name || "")
-      .replace(/_/g, " ")
-      .replace(/\b\w/g, (char) => char.toUpperCase());
 
   const getStatusClass = (status) => {
     const normalized = (status || "").toUpperCase();
@@ -804,7 +851,6 @@ function ValidationResults() {
                 <div className="vr-issues-list">
                   {llmResults.map((result, index) => {
                     const analysis = result.analysis || {};
-                    const dimensions = analysis.dimensions || {};
 
                     return (
                       <article
@@ -820,96 +866,31 @@ function ValidationResults() {
                         </div>
 
                         <div className="vr-ai-overall">
-                          <span>Overall status</span>
-                          <span
-                            className={`vr-status ${getStatusClass(
-                              analysis.overall_status
-                            )}`}
-                          >
-                            {getStatusIcon(analysis.overall_status)}
-                            {analysis.overall_status || "NEEDS_REVIEW"}
-                          </span>
+                          <span>Quality score</span>
+                          <strong>{analysis.quality_score}/100 · {analysis.classification}</strong>
                         </div>
-
-                        {Object.keys(dimensions).length > 0 && (
-                          <div className="vr-dimensions">
-                            <h4>Quality attributes</h4>
-
-                            {Object.entries(dimensions).map(
-                              ([attribute, details]) => {
-                                const status =
-                                  details?.status || "NEEDS_REVIEW";
-
-                                const ruleReasons = Array.isArray(
-                                  details?.rule_reason
-                                )
-                                  ? details.rule_reason
-                                  : [];
-
-                                return (
-                                  <div
-                                    className="vr-dimension-card"
-                                    key={attribute}
-                                  >
-                                    <div className="vr-dimension-top">
-                                      <strong>
-                                        {formatAttributeName(attribute)}
-                                      </strong>
-                                      <span
-                                        className={`vr-status ${getStatusClass(
-                                          status
-                                        )}`}
-                                      >
-                                        {getStatusIcon(status)}
-                                        {status}
-                                      </span>
-                                    </div>
-
-                                    {ruleReasons.length > 0 && (
-                                      <ul>
-                                        {ruleReasons.map((reason, i) => (
-                                          <li key={i}>{reason}</li>
-                                        ))}
-                                      </ul>
-                                    )}
-
-                                    {details?.llm_reason && (
-                                      <p className="vr-ai-explanation">
-                                        <strong>AI explanation:</strong>{" "}
-                                        {details.llm_reason}
-                                      </p>
-                                    )}
-
-                                    {ruleReasons.length === 0 &&
-                                      !details?.llm_reason && (
-                                        <p className="vr-muted-copy">
-                                          No specific explanation was provided.
-                                        </p>
-                                      )}
-                                  </div>
-                                );
-                              }
-                            )}
+                        <div className="vr-issue-metadata">
+                          <span>Clarity: {analysis.clarity || "—"}</span>
+                          <span>Completeness: {analysis.completeness || "—"}</span>
+                          <span>Testability: {analysis.testability || "—"}</span>
+                          <span>Feasibility: {analysis.feasibility || "—"}</span>
+                          <span>Consistency: {analysis.consistency || "—"}</span>
+                        </div>
+                        {analysis.explanation && <p className="vr-ai-explanation">{analysis.explanation}</p>}
+                        {[
+                          ["Ambiguities", analysis.ambiguities],
+                          ["Missing information", analysis.missing_information],
+                          ["Issues", analysis.issues],
+                        ].map(([title, items]) => Array.isArray(items) && items.length > 0 && (
+                          <div className="vr-detail-block" key={title}>
+                            <h4><AlertTriangle size={16} />{title}</h4>
+                            <ul>{items.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul>
                           </div>
-                        )}
-
-                        {analysis.main_issue && (
-                          <div className="vr-detail-block">
-                            <h4>
-                              <AlertTriangle size={16} />
-                              Main issue
-                            </h4>
-                            <p>{analysis.main_issue}</p>
-                          </div>
-                        )}
-
-                        {analysis.recommendation && (
+                        ))}
+                        {analysis.suggested_rewrite && (
                           <div className="vr-suggestion-block">
-                            <h4>
-                              <Lightbulb size={16} />
-                              Recommendation
-                            </h4>
-                            <p>{analysis.recommendation}</p>
+                            <h4><Lightbulb size={16} />Suggested rewrite</h4>
+                            <p>{analysis.suggested_rewrite}</p>
                           </div>
                         )}
                       </article>

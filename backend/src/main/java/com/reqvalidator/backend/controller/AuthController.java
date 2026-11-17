@@ -20,7 +20,7 @@ import com.reqvalidator.backend.security.JwtService;
 
 @RestController
 @RequestMapping("/api/auth")
-@CrossOrigin(origins = "http://localhost:5173")
+@CrossOrigin(origins = {"http://localhost:5173", "https://ai-software-requirement-validator.vercel.app"})
 public class AuthController {
 
     private final UserRepository userRepository;

@@ -19,7 +19,7 @@ import com.reqvalidator.backend.repository.ProjectRepository;
 
 @RestController
 @RequestMapping("/api/projects")
-@CrossOrigin(origins = "http://localhost:5173")
+@CrossOrigin(origins = {"http://localhost:5173", "https://ai-software-requirement-validator.vercel.app"})
 public class ProjectController {
 
     private final ProjectRepository projectRepository;

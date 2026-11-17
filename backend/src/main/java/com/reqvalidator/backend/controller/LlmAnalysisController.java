@@ -30,7 +30,7 @@ import com.reqvalidator.backend.service.LlmAnalysisService;
 
 @RestController
 @RequestMapping("/api/llm")
-@CrossOrigin(origins = "http://localhost:5173")
+@CrossOrigin(origins = {"http://localhost:5173", "https://ai-software-requirement-validator.vercel.app"})
 public class LlmAnalysisController {
 
     private static final Logger logger = LoggerFactory.getLogger(LlmAnalysisController.class);

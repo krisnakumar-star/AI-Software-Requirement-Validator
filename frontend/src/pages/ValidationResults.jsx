@@ -69,6 +69,10 @@ function ValidationResults() {
   const [llmLoading, setLlmLoading] = useState(false);
   const [error, setError] = useState("");
   const [llmError, setLlmError] = useState("");
+  const [localModelLoading, setLocalModelLoading] = useState(false);
+  const [localModelProgress, setLocalModelProgress] = useState("");
+  const [localModelError, setLocalModelError] = useState("");
+  const [localModelReport, setLocalModelReport] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -236,6 +240,48 @@ function ValidationResults() {
       );
     } finally {
       setLlmLoading(false);
+    }
+  };
+
+  const runFreeLocalModelReview = async () => {
+    setLocalModelLoading(true);
+    setLocalModelError("");
+    setLocalModelReport("");
+    setLocalModelProgress("Loading the open-weight Qwen model into your browser. The first download may take a few minutes.");
+
+    try {
+      const { generateSrsReview } = await import("../services/localSrsModel");
+      const items = llmResults.length > 0
+        ? llmResults
+        : requirements.map((item) => ({
+            requirement: item.requirementText || "",
+            analysis: {
+              issues: item.issues || [],
+              suggestions: item.suggestions || [],
+              quality_score: item.qualityScore,
+              classification: item.classification || "Not classified",
+            },
+          })).filter((item) => item.requirement.trim());
+
+      if (items.length === 0) {
+        throw new Error("No requirement text is available for review.");
+      }
+
+      const selected = items.slice(0, 8);
+      setLocalModelProgress("The local model is reviewing requirement meaning, gaps, risks, and test ideas...");
+      const report = await generateSrsReview(selected, (message) => setLocalModelProgress(message));
+      setLocalModelReport(report);
+      if (items.length > selected.length) {
+        setLocalModelProgress(`Reviewed the first ${selected.length} requirements. Run additional batches for the remaining requirements.`);
+      } else {
+        setLocalModelProgress("Review completed locally in your browser. No API key was used.");
+      }
+    } catch (err) {
+      console.error("Local open model review failed:", err);
+      setLocalModelError(err.message || "The local model could not be loaded. Try a modern Chrome or Edge browser with WebGPU support.");
+      setLocalModelProgress("");
+    } finally {
+      setLocalModelLoading(false);
     }
   };
 
@@ -763,6 +809,59 @@ function ValidationResults() {
               <BrainCircuit size={24} />
             </span>
           </div>
+
+          <div className="vr-ai-prompt">
+            <div className="vr-ai-prompt-icon">
+              <BrainCircuit size={24} />
+            </div>
+            <div className="vr-ai-prompt-copy">
+              <h3>Free open-weight LLM · Runs in your browser</h3>
+              <p>
+                Load Qwen2.5 0.5B Instruct locally using WebAssembly/WebGPU.
+                No provider API key or paid inference endpoint is required.
+                The first model download can be large and generation speed depends on your device.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="vr-primary-button"
+              onClick={runFreeLocalModelReview}
+              disabled={localModelLoading}
+            >
+              {localModelLoading ? (
+                <>
+                  <LoaderCircle size={17} className="vr-spinner" />
+                  Loading model...
+                </>
+              ) : (
+                <>
+                  <BrainCircuit size={17} />
+                  Run free local LLM review
+                </>
+              )}
+            </button>
+          </div>
+
+          {localModelProgress && (
+            <div className="vr-ai-explanation" role="status">{localModelProgress}</div>
+          )}
+          {localModelError && (
+            <div className="vr-error-banner" role="alert">
+              <AlertTriangle size={18} />
+              <span>{localModelError}</span>
+            </div>
+          )}
+          {localModelReport && (
+            <article className="vr-issue-card vr-ai-result-card">
+              <div className="vr-ai-overall">
+                <span>OPEN-WEIGHT MODEL REVIEW</span>
+                <strong>Qwen2.5 0.5B Instruct · Local browser inference</strong>
+              </div>
+              <pre className="vr-ai-explanation" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontFamily: "inherit" }}>
+                {localModelReport}
+              </pre>
+            </article>
+          )}
 
           {!llmAnalysis && (
             <div className="vr-ai-prompt">

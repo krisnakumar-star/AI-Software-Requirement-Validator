@@ -293,7 +293,7 @@ async def call_llm(
 ) -> dict:
 
     payload = {
-        "model": LLM_MODEL,
+        "model": "local-rule-engine",
         "messages": [
             {
                 "role": "system",
@@ -568,32 +568,161 @@ def validate_analysis(result: dict) -> dict:
 # ANALYZE ONE REQUIREMENT
 # ==================================================
 
+def analyze_requirement_locally(
+    requirement: str,
+    source: str | None = None,
+    section_number: str | None = None
+) -> dict:
+    """
+    Deterministic, offline SRS analysis.
+    This engine does not call an external LLM or require provider credentials.
+    Findings are heuristic and should be reviewed by a requirements engineer.
+    """
+    text = requirement.strip()
+    lower = text.lower()
+    words = re.findall(r"\b[\w'-]+\b", text)
+    word_count = len(words)
+
+    ambiguities = []
+    missing_information = []
+    issues = []
+
+    vague_terms = [
+        "fast", "quickly", "user-friendly", "easy", "efficient",
+        "adequate", "appropriate", "robust", "seamless", "soon",
+        "as soon as possible", "etc", "and so on", "normally",
+        "usually", "sufficient", "minimal", "maximum"
+    ]
+    for term in vague_terms:
+        if re.search(r"\b" + re.escape(term) + r"\b", lower):
+            ambiguities.append(
+                f'The term "{term}" is subjective or insufficiently quantified.'
+            )
+
+    actors = ["system", "application", "user", "administrator", "customer",
+              "service", "platform", "operator", "client"]
+    has_actor = any(re.search(r"\b" + re.escape(actor) + r"\b", lower) for actor in actors)
+    if not has_actor:
+        missing_information.append("Identify the actor or system component responsible for the behavior.")
+
+    modal_pattern = r"\b(shall|must|will|required to|should)\b"
+    has_obligation = bool(re.search(modal_pattern, lower))
+    if not has_obligation:
+        issues.append("The requirement does not use a clear obligation statement such as 'shall' or 'must'.")
+
+    measurable_patterns = [
+        r"\b\d+(?:\.\d+)?\s*(?:ms|milliseconds?|seconds?|minutes?|hours?|days?|weeks?|mb|gb|%|percent)\b",
+        r"\b(?:at least|at most|no more than|within|between|less than|greater than)\b",
+        r"\b\d+\s*(?:records?|users?|requests?|transactions?|attempts?)\b"
+    ]
+    measurable = any(re.search(pattern, lower) for pattern in measurable_patterns)
+    if not measurable:
+        ambiguities.append("No measurable threshold, limit, or acceptance criterion is stated.")
+
+    if word_count < 8:
+        missing_information.append("Provide more detail about the expected behavior and acceptance conditions.")
+    if word_count > 120:
+        issues.append("The requirement is lengthy; consider splitting it into smaller, independently testable requirements.")
+
+    if re.search(r"\b(and|or)\b", lower) and word_count > 20:
+        issues.append("The statement may combine multiple behaviors. Check whether it should be split into atomic requirements.")
+
+    if re.search(r"\b(may|might|could|possibly)\b", lower):
+        ambiguities.append("The wording expresses possibility rather than a mandatory, verifiable behavior.")
+
+    if not re.search(r"\b(when|if|after|before|upon|once|during|while)\b", lower):
+        missing_information.append("Consider specifying the trigger or conditions under which the requirement applies.")
+
+    nonfunctional_terms = [
+        "performance", "availability", "reliability", "security", "scalability",
+        "usability", "maintainability", "response time", "throughput",
+        "encryption", "accessibility", "backup", "recovery"
+    ]
+    constraint_terms = [
+        "must use", "shall use", "compatible with", "compliance",
+        "regulation", "standard", "constraint", "technology stack"
+    ]
+    if any(term in lower for term in constraint_terms):
+        classification = "Constraint"
+    elif any(term in lower for term in nonfunctional_terms):
+        classification = "Non-Functional"
+    else:
+        classification = "Functional"
+
+    if has_actor and has_obligation and word_count >= 8:
+        clarity = "Good" if not ambiguities else "Moderate"
+    elif word_count >= 8:
+        clarity = "Moderate"
+    else:
+        clarity = "Poor"
+
+    completeness = "Complete" if not missing_information and not ambiguities else (
+        "Partial" if word_count >= 8 else "Incomplete"
+    )
+
+    testability = "Testable" if measurable and has_obligation else (
+        "Partially Testable" if has_obligation or measurable else "Not Testable"
+    )
+
+    score = 100
+    score -= min(25, len(ambiguities) * 8)
+    score -= min(25, len(missing_information) * 8)
+    score -= min(20, len(issues) * 7)
+    if not has_actor:
+        score -= 8
+    if not has_obligation:
+        score -= 10
+    if word_count < 8:
+        score -= 10
+    score = max(0, min(100, score))
+
+    if not has_obligation:
+        suggested_rewrite = f"The system shall {text[0].lower() + text[1:] if text else text}"
+        if suggested_rewrite.endswith("."):
+            suggested_rewrite = suggested_rewrite[:-1]
+        suggested_rewrite += ". Define measurable acceptance criteria for this behavior."
+    else:
+        suggested_rewrite = text
+        if not measurable:
+            suggested_rewrite += " Specify a measurable acceptance criterion or threshold."
+
+    explanation_parts = [
+        f"The local SRS analyzer evaluated {word_count} words using requirement-quality rules.",
+        f"Detected classification: {classification}.",
+        f"Testability assessment: {testability}."
+    ]
+    if ambiguities:
+        explanation_parts.append(f"Found {len(ambiguities)} ambiguity indicator(s).")
+    if missing_information:
+        explanation_parts.append(f"Identified {len(missing_information)} potentially missing detail(s).")
+    explanation_parts.append(
+        "This is an offline heuristic assessment, not a generative LLM judgment; validate findings with a human reviewer."
+    )
+
+    return {
+        "quality_score": score,
+        "classification": classification,
+        "clarity": clarity,
+        "completeness": completeness,
+        "testability": testability,
+        "ambiguities": ambiguities,
+        "missing_information": missing_information,
+        "issues": issues,
+        "suggested_rewrite": suggested_rewrite,
+        "explanation": " ".join(explanation_parts)
+    }
+
+
 async def analyze_requirement(
     requirement: str,
     source: str | None = None,
     section_number: str | None = None
 ) -> dict:
-
-    user_prompt = f"""
-Analyze the following software requirement.
-
-Requirement:
-{requirement}
-
-Source:
-{source or "Not provided"}
-
-Section:
-{section_number or "Not provided"}
-
-Return one complete analysis using the required JSON structure.
-"""
-
-    result = await call_llm(
-        SYSTEM_PROMPT,
-        user_prompt
+    result = analyze_requirement_locally(
+        requirement,
+        source,
+        section_number
     )
-
     return validate_analysis(result)
 
 
@@ -607,7 +736,7 @@ def home():
     return {
         "message": "AI Requirement Validator is running",
         "version": "6.0.0",
-        "provider": "Groq",
+        "provider": "Local SRS Rule Engine",
         "model": LLM_MODEL
     }
 
@@ -625,7 +754,8 @@ def health():
         "provider": "Groq",
         "model": LLM_MODEL,
         "internal_auth_configured": bool(SRS_API_KEY),
-        "provider_api_key_configured": bool(GROQ_API_KEY)
+        "provider_api_key_configured": True,
+        "analysis_mode": "offline_rules"
     }
 
 

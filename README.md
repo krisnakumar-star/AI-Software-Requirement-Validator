@@ -92,18 +92,13 @@ mongodb://localhost:27017/requirement_validator
 
 ### 3. Configure and run the AI service
 
-The FastAPI service calls Groq's OpenAI-compatible Chat Completions API using `openai/gpt-oss-120b` by default.
+The FastAPI service includes an offline, deterministic SRS analysis engine. It does not call an external LLM provider and does not require Groq, JarvisClaw, a provider API key, or paid AI credits.
 
-Create `ai-service/.env` from `.env.example` and configure:
+Set `SRS_API_KEY` on the AI service. This private internal key must match the backend's `LLM_API_KEY` value.
 
-- `SRS_API_KEY`: a private random key shared with the backend's `LLM_API_KEY`.
-- `GROQ_API_KEY`: your private Groq API key. Create it in the [Groq Console](https://console.groq.com/keys).
-- `LLM_BASE_URL`: defaults to `https://api.groq.com/openai/v1/chat/completions`.
-- `LLM_MODEL`: defaults to `openai/gpt-oss-120b`.
+The local analyzer evaluates requirement wording, actors, obligation language, measurable criteria, ambiguity indicators, completeness signals, testability, and likely requirement classification. It returns a structured quality assessment, issues, missing information, and a suggested rewrite. Its results are heuristic rather than generative-LLM output and should be reviewed by a requirements engineer.
 
-Groq offers a free tier subject to model-specific rate and usage limits. Check the current limits in your Groq account. Never commit either key.
-
-In Render, set `SRS_API_KEY` and `GROQ_API_KEY` on the AI service. The backend must have `LLM_API_KEY` equal to the AI service's `SRS_API_KEY` and `LLM_API_URL` set to the FastAPI service URL.
+Create `ai-service/.env` from `.env.example`, set `SRS_API_KEY`, then run:
 
 ```powershell
 cd ai-service
@@ -114,7 +109,7 @@ if (!(Test-Path .env)) { Copy-Item .env.example .env }
 uvicorn main:app --host 0.0.0.0 --port 8001
 ```
 
-Verify `/health` reports both internal authentication and provider API key configuration before testing `/analyze`.
+On Render, set `SRS_API_KEY` on the AI service and set the same value as `LLM_API_KEY` on the Spring Boot backend. No external provider key is needed.
 
 ### 4. Run Spring Boot
 

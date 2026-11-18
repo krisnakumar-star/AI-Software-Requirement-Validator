@@ -31,6 +31,14 @@ Keep the existing Spring Boot configuration:
 - `LLM_API_URL=https://<your-ai-service>.onrender.com`
 - `LLM_API_KEY=<same value as SRS_API_KEY>`
 
+
+
+## Free open-weight LLM in the browser
+
+The Validation Results page includes an optional local-model review using `onnx-community/Qwen2.5-0.5B-Instruct` through Transformers.js. The model runs on the visitor's device using WebGPU when available and falls back to WASM/CPU. It does not require a provider API key or paid inference API. Model files are downloaded from Hugging Face on first use and may be cached by the browser; first load can take time and performance depends on the user's hardware. The existing FastAPI rule-based analysis remains available and supplies deterministic checks and scores. The small 0.5B model generates additional natural-language explanations, clarification questions, draft acceptance criteria and test ideas; it should not be treated as an expert substitute or a guarantee of correctness.
+
+This browser-side option avoids putting LLM weights on the Render free service. Render free web services have resource and ephemeral-filesystem limitations; they also spin down when idle. See the [Render free service limitations](https://render.com/docs/free). Transformers.js runs supported models in the browser with ONNX Runtime and WebGPU/WASM; see [Transformers.js documentation](https://huggingface.co/docs/transformers.js/en/index) and the [Qwen2.5 0.5B ONNX model card](https://huggingface.co/onnx-community/Qwen2.5-0.5B-Instruct).
+
 ## Local development
 
 ```bash

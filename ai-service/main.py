@@ -19,7 +19,7 @@ load_dotenv()
 
 app = FastAPI(
     title="AI Software Requirement Validator",
-    description="AI-powered SRS analysis using JarvisClaw",
+    description="AI-powered SRS analysis using Groq",
     version="6.0.0"
 )
 
@@ -27,10 +27,10 @@ app = FastAPI(
 # JARVISCLAW CONFIGURATION
 # ==================================================
 
-LLM_BASE_URL = "https://api.jarvisclaw.ai/v1/chat/completions"
-LLM_MODEL = os.getenv("LLM_MODEL", "auto")
+LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1/chat/completions")
+LLM_MODEL = os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
 SRS_API_KEY = os.getenv("SRS_API_KEY")
-JARVISCLAW_API_KEY = os.getenv("JARVISCLAW_API_KEY")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 LLM_TIMEOUT = 90.0
 logger = logging.getLogger("requirement-validator.jarvisclaw")
 
@@ -307,10 +307,10 @@ async def call_llm(
         "max_tokens": 2500
     }
 
-    if not JARVISCLAW_API_KEY:
+    if not GROQ_API_KEY:
         raise HTTPException(
             status_code=503,
-            detail="JarvisClaw provider API key is not configured. Set JARVISCLAW_API_KEY on the AI service."
+            detail="Groq provider API key is not configured. Set GROQ_API_KEY on the AI service."
         )
 
     try:
@@ -324,40 +324,40 @@ async def call_llm(
                 json=payload,
                 headers={
                     "Content-Type": "application/json",
-                    "Authorization": f"Bearer {JARVISCLAW_API_KEY}"
+                    "Authorization": f"Bearer {GROQ_API_KEY}"
                 }
             )
 
-            logger.info("JarvisClaw returned HTTP %s", response.status_code)
+            logger.info("Groq returned HTTP %s", response.status_code)
 
             if response.status_code != 200:
                 upstream_detail = safe_upstream_error(response)
                 logger.error(
-                    "JarvisClaw request failed (HTTP %s): %s",
+                    "Groq request failed (HTTP %s): %s",
                     response.status_code,
                     upstream_detail,
                 )
 
                 if response.status_code == 401:
-                    category = "JarvisClaw rejected the request"
+                    category = "Groq rejected the request"
 
                 elif response.status_code == 403:
-                    category = "JarvisClaw denied access"
+                    category = "Groq denied access"
 
                 elif response.status_code == 404:
-                    category = "JarvisClaw endpoint or model not found"
+                    category = "Groq endpoint or model not found"
 
                 elif response.status_code == 429:
-                    category = "JarvisClaw rate limit reached"
+                    category = "Groq rate limit reached"
 
                 elif response.status_code == 402:
-                    category = "JarvisClaw requires payment or credits"
+                    category = "Groq requires payment or credits"
 
                 elif response.status_code >= 500:
-                    category = "JarvisClaw is temporarily unavailable"
+                    category = "Groq is temporarily unavailable"
 
                 else:
-                    category = f"JarvisClaw returned HTTP {response.status_code}"
+                    category = f"Groq returned HTTP {response.status_code}"
 
                 raise HTTPException(
                     status_code=502,
@@ -370,7 +370,7 @@ async def call_llm(
             except ValueError:
                 raise HTTPException(
                     status_code=502,
-                    detail="JarvisClaw returned invalid response JSON"
+                    detail="Groq returned invalid response JSON"
                 )
 
         choices = data.get("choices", [])
@@ -378,7 +378,7 @@ async def call_llm(
         if not choices:
             raise HTTPException(
                 status_code=502,
-                detail="JarvisClaw returned no response choices"
+                detail="Groq returned no response choices"
             )
 
         content = (
@@ -390,13 +390,13 @@ async def call_llm(
         if not isinstance(content, str) or not content.strip():
             raise HTTPException(
                 status_code=502,
-                detail="JarvisClaw returned empty AI content"
+                detail="Groq returned empty AI content"
             )
 
         try:
             result = parse_json_response(content)
 
-            print("JarvisClaw response parsed successfully")
+            print("Groq response parsed successfully")
 
             return result
 
@@ -415,7 +415,7 @@ async def call_llm(
 
     except httpx.TimeoutException:
 
-        print("JarvisClaw request timed out")
+        print("Groq request timed out")
 
         raise HTTPException(
             status_code=504,
@@ -425,13 +425,13 @@ async def call_llm(
     except httpx.RequestError as exc:
 
         print(
-            "JarvisClaw connection error:",
+            "Groq connection error:",
             type(exc).__name__
         )
 
         raise HTTPException(
             status_code=502,
-            detail="Could not connect to JarvisClaw"
+            detail="Could not connect to Groq"
         )
 
     except Exception as exc:
@@ -607,7 +607,7 @@ def home():
     return {
         "message": "AI Requirement Validator is running",
         "version": "6.0.0",
-        "provider": "JarvisClaw",
+        "provider": "Groq",
         "model": LLM_MODEL
     }
 
@@ -622,10 +622,10 @@ def health():
     return {
         "status": "ok",
         "service": "SRS AI Analyzer",
-        "provider": "JarvisClaw",
+        "provider": "Groq",
         "model": LLM_MODEL,
         "internal_auth_configured": bool(SRS_API_KEY),
-        "provider_api_key_configured": bool(JARVISCLAW_API_KEY)
+        "provider_api_key_configured": bool(GROQ_API_KEY)
     }
 
 
@@ -665,7 +665,7 @@ async def analyze(
 
     return {
         "status": "success",
-        "provider": "JarvisClaw",
+        "provider": "Groq",
         "model": LLM_MODEL,
         "requirement": requirement,
         "analysis": result
@@ -734,7 +734,7 @@ async def analyze_batch(
 
     return {
         "status": "success",
-        "provider": "JarvisClaw",
+        "provider": "Groq",
         "model": LLM_MODEL,
         "total_requirements": len(requirements),
         "analyses": analyses

@@ -19,20 +19,16 @@ load_dotenv()
 
 app = FastAPI(
     title="AI Software Requirement Validator",
-    description="AI-powered SRS analysis using Groq",
+    description="Offline rule-based SRS requirement analysis",
     version="6.0.0"
 )
 
 # ==================================================
-# JARVISCLAW CONFIGURATION
+# LOCAL ANALYSIS CONFIGURATION
 # ==================================================
 
-LLM_BASE_URL = os.getenv("LLM_BASE_URL", "https://api.groq.com/openai/v1/chat/completions")
-LLM_MODEL = os.getenv("LLM_MODEL", "openai/gpt-oss-120b")
 SRS_API_KEY = os.getenv("SRS_API_KEY")
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-LLM_TIMEOUT = 90.0
-logger = logging.getLogger("requirement-validator.jarvisclaw")
+ANALYSIS_ENGINE = "offline-rule-engine"
 
 
 # ==================================================
@@ -737,7 +733,7 @@ def home():
         "message": "AI Requirement Validator is running",
         "version": "6.0.0",
         "provider": "Local SRS Rule Engine",
-        "model": LLM_MODEL
+        "model": ANALYSIS_ENGINE
     }
 
 
@@ -751,8 +747,8 @@ def health():
     return {
         "status": "ok",
         "service": "SRS AI Analyzer",
-        "provider": "Groq",
-        "model": LLM_MODEL,
+        "provider": "Local SRS Rule Engine",
+        "model": ANALYSIS_ENGINE,
         "internal_auth_configured": bool(SRS_API_KEY),
         "provider_api_key_configured": True,
         "analysis_mode": "offline_rules"

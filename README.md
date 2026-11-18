@@ -92,15 +92,18 @@ mongodb://localhost:27017/requirement_validator
 
 ### 3. Configure and run the AI service
 
-The FastAPI service calls JarvisClaw's OpenAI-compatible Chat Completions API at `https://api.jarvisclaw.ai/v1/chat/completions`.
+The FastAPI service calls Groq's OpenAI-compatible Chat Completions API using `openai/gpt-oss-120b` by default.
 
 Create `ai-service/.env` from `.env.example` and configure:
 
 - `SRS_API_KEY`: a private random key shared with the backend's `LLM_API_KEY`.
-- `JARVISCLAW_API_KEY`: your JarvisClaw API key (starts with `sk-`). This provider credential is different from `SRS_API_KEY`.
-- `LLM_MODEL`: a model identifier available in your JarvisClaw account; `auto` uses the provider's smart router.
+- `GROQ_API_KEY`: your private Groq API key. Create it in the [Groq Console](https://console.groq.com/keys).
+- `LLM_BASE_URL`: defaults to `https://api.groq.com/openai/v1/chat/completions`.
+- `LLM_MODEL`: defaults to `openai/gpt-oss-120b`.
 
-Never commit either key. In Render, set these as environment variables on the AI service. The backend must have `LLM_API_KEY` equal to the AI service's `SRS_API_KEY`.
+Groq offers a free tier subject to model-specific rate and usage limits. Check the current limits in your Groq account. Never commit either key.
+
+In Render, set `SRS_API_KEY` and `GROQ_API_KEY` on the AI service. The backend must have `LLM_API_KEY` equal to the AI service's `SRS_API_KEY` and `LLM_API_URL` set to the FastAPI service URL.
 
 ```powershell
 cd ai-service
@@ -111,7 +114,7 @@ if (!(Test-Path .env)) { Copy-Item .env.example .env }
 uvicorn main:app --host 0.0.0.0 --port 8001
 ```
 
-Verify `/health` reports both internal authentication and provider API key configuration before testing a real `/analyze` request.
+Verify `/health` reports both internal authentication and provider API key configuration before testing `/analyze`.
 
 ### 4. Run Spring Boot
 

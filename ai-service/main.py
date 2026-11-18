@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import secrets
+from collections import Counter
 from typing import Any
 
 from dotenv import load_dotenv
@@ -13,11 +14,11 @@ load_dotenv()
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("srs-analyzer")
 
-VERSION = "7.0.0"
+VERSION = "8.0.0"
 SRS_API_KEY = os.getenv("SRS_API_KEY")
 app = FastAPI(
     title="SRS Requirement Analyzer",
-    description="Lightweight, model-free software requirement analysis service",
+    description="Multi-dimensional, model-free software requirement analysis service",
     version=VERSION,
 )
 
@@ -29,7 +30,7 @@ class AnalyzeRequest(BaseModel):
     text: str | None = None
 
 class BatchAnalyzeRequest(BaseModel):
-    requirements: list[str] = Field(min_length=1, max_length=20)
+    requirements: list[str] = Field(min_length=1, max_length=100)
 
     @model_validator(mode="before")
     @classmethod
@@ -65,69 +66,86 @@ def verify_api_key(x_api_key: str | None = Header(default=None)):
     if not x_api_key or not secrets.compare_digest(x_api_key, SRS_API_KEY):
         raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
-# This is a transparent NLP/heuristic analyzer, not a generative LLM.
-# Findings are derived from the submitted text; no external AI provider is called.
+# Transparent deterministic NLP/rule engine. It is not a trained or generative LLM.
 ACTION_VERBS = {
-    "create", "add", "update", "delete", "remove", "submit", "display", "show",
-    "send", "receive", "generate", "calculate", "search", "filter", "export",
-    "import", "upload", "download", "authenticate", "authorize", "validate",
-    "store", "save", "retrieve", "notify", "track", "manage", "process",
-    "allow", "prevent", "support", "provide", "record", "approve", "reject",
+    "create", "add", "update", "delete", "remove", "submit", "display", "show", "send",
+    "receive", "generate", "calculate", "search", "filter", "export", "import", "upload",
+    "download", "authenticate", "authorize", "validate", "store", "save", "retrieve",
+    "notify", "track", "manage", "process", "allow", "prevent", "support", "provide",
+    "record", "approve", "reject", " encrypt", "encrypt", "backup", "restore", "synchronize",
+    "sync", "monitor", "log", "respond", "return", "route", "verify", "assign", "configure",
+    "cancel", "schedule", "pay", "calculate", "convert", "lock", "unlock", "archive",
 }
-VAGUE_TERMS = {
-    "fast": "Define a measurable response-time target and the conditions under which it applies.",
-    "quick": "Replace 'quick' with a measurable completion or response-time limit.",
-    "user-friendly": "Specify the usability outcomes or acceptance criteria expected from users.",
-    "easy": "Describe the task users must complete and how successful completion is measured.",
-    "efficient": "Specify the resource or performance metric and its acceptable threshold.",
-    "secure": "Identify the security controls, protected assets and expected threat conditions.",
-    "reliable": "Specify availability, failure-rate or recovery-time expectations.",
-    "scalable": "Specify expected users, workload, data volume and growth target.",
-    "appropriate": "State the exact condition or rule that determines what is appropriate.",
+VAGUE = {
+    "fast": "Replace 'fast' with a response-time or throughput threshold and test conditions.",
+    "quick": "Specify the maximum completion time instead of 'quick'.",
+    "user-friendly": "Define usability outcomes, target users and task-completion criteria.",
+    "easy": "Name the user task and define how successful completion is measured.",
+    "efficient": "Name the resource/performance metric and its acceptable threshold.",
+    "secure": "Specify controls, protected assets, threat assumptions and verification criteria.",
+    "reliable": "Define an availability, failure-rate, or recovery objective.",
+    "scalable": "Specify expected users, workload, data volume and growth.",
+    "appropriate": "Replace 'appropriate' with an explicit rule or condition.",
     "soon": "Replace 'soon' with a measurable time limit.",
-    "as needed": "Define the event or condition that triggers this behavior.",
-    "etc": "List the remaining in-scope items explicitly or define the scope boundary.",
-    "and so on": "List the remaining in-scope items explicitly or define the scope boundary.",
+    "as needed": "Define the event or condition that triggers the behavior.",
+    "etc": "Enumerate the remaining in-scope items or define a clear scope boundary.",
+    "and so on": "Enumerate the remaining in-scope items or define a clear scope boundary.",
+    "minimal": "Define the maximum/minimum acceptable value.",
+    "maximum": "Specify the numeric maximum and its unit.",
+    "minimum": "Specify the numeric minimum and its unit.",
+    "normally": "Define the exact conditions and behavior for each relevant case.",
+    "user-friendly": "Define measurable usability criteria for the target user group.",
 }
-ABSOLUTE_TERMS = {"always", "never", "all", "any", "every", "none", "only"}
-NON_FUNCTIONAL = {
-    "performance": ["performance", "response time", "latency", "throughput", "concurrent", "load time"],
-    "security": ["security", "encrypt", "encryption", "password", "authentication", "authorization", "access control", "audit"],
-    "availability": ["availability", "uptime", "downtime", "available", "recovery time"],
-    "usability": ["usability", "accessible", "accessibility", "easy to use", "user friendly"],
-    "reliability": ["reliability", "failure rate", "fault tolerant", "recover"],
-    "compatibility": ["compatible", "browser", "operating system", "platform", "device"],
-    "maintainability": ["maintainable", "modular", "logging", "monitoring", "diagnostic"],
+CATEGORY_RULES = {
+    "Security": ["security", "encrypt", "encryption", "password", "authentication", "authorization", "access control", "role-based", "multi-factor", "mfa", "audit log", "session"],
+    "Performance": ["performance", "response time", "latency", "throughput", "load time", "concurrent", "requests per second", "milliseconds", "seconds"],
+    "Availability": ["availability", "uptime", "downtime", "available", "service level", "failover"],
+    "Reliability": ["reliability", "failure rate", "fault tolerant", "recover", "retry", "data loss", "recovery point", "recovery time"],
+    "Usability": ["usability", "accessible", "accessibility", "easy to use", "user friendly", "learnability", "screen reader"],
+    "Compatibility": ["compatible", "browser", "operating system", "platform", "device", "ios", "android", "windows", "linux"],
+    "Maintainability": ["maintainable", "modular", "logging", "monitoring", "diagnostic", "code quality", "deployment"],
+    "Privacy": ["privacy", "personal data", "sensitive data", "consent", "data retention", "erase personal", "anonymize", "gdpr"],
+    "Interface / Integration": ["api", "interface", "integration", "webhook", "json", "xml", "http", "endpoint", "third-party", "external system"],
+    "Data": ["database", "data", "record", "field", "schema", "backup", "restore", "import", "export", "validation"],
+    "Regulatory / Compliance": ["compliance", "regulation", "regulatory", "standard", "iso ", "pci", "hipaa", "gdpr", "legal"],
 }
-CONSTRAINT_TERMS = [
-    "must use", "shall use", "technology", "framework", "database", "platform",
-    "regulation", "compliance", "standard", "legal", "constraint", "budget",
-]
+CONSTRAINT_TERMS = ["must use", "shall use", "technology", "framework", "database", "platform", "regulation", "compliance", "standard", "legal", "constraint", "budget", "shall be developed using"]
 ACTOR_PATTERNS = [
-    r"\bthe system\b", r"\bthe user\b", r"\badministrator\b",
-    r"\badmin\b", r"\bcustomer\b", r"\bmanager\b", r"\boperator\b",
-    r"\bservice\b", r"\bapplication\b",
+    r"\bthe system\b", r"\bthe application\b", r"\bthe platform\b", r"\bthe service\b",
+    r"\bthe user\b", r"\ban? administrator\b", r"\badmin\b", r"\bcustomer\b",
+    r"\bmanager\b", r"\boperator\b", r"\bclient\b", r"\bserver\b", r"\bapi\b",
+    r"\b[\w-]+ service\b",
 ]
-MODAL_RE = re.compile(r"\b(shall|must|will|should|may|can)\b", re.I)
-MEASURE_RE = re.compile(r"\b(\d+(?:\.\d+)?\s*(?:ms|milliseconds?|seconds?|minutes?|hours?|days?|%|percent|users?|requests?/second|mb|gb))\b", re.I)
-BOUNDARY_WORDS = ("when", "if", "unless", "after", "before", "during", "within", "provided that")
-TEST_WORDS = ("verify", "confirm", "test", "display", "return", "reject", "accept", "within", "equal", "greater than", "less than")
+MODAL_RE = re.compile(r"\b(shall|must|will|should|may|can|cannot|must not|shall not)\b", re.I)
+NUMBER_UNIT_RE = re.compile(r"\b\d+(?:\.\d+)?\s*(?:ms|milliseconds?|seconds?|minutes?|hours?|days?|weeks?|months?|%|percent|users?|requests?\s*/\s*second|req/s|mb|gb|tb|records?|items?)\b", re.I)
+BOUNDARIES = ("when", "if", "unless", "after", "before", "during", "within", "provided that", "once", "until")
+PRONOUNS = {"it", "they", "them", "this", "that", "these", "those"}
 STOP = {"the","a","an","and","or","to","of","in","on","for","by","with","from","at","is","are","be","as","it","its","this","that","shall","must","will","should","can","may","system","user"}
 
 def words(text: str) -> list[str]:
     return re.findall(r"[a-zA-Z0-9]+(?:[-'][a-zA-Z0-9]+)*", text.lower())
 
-def classify(text: str) -> str:
+def unique(items):
+    return list(dict.fromkeys(items))
+
+def classify(text: str) -> tuple[str, list[str]]:
     lower = text.lower()
-    if any(term in lower for term in CONSTRAINT_TERMS) and not any(v in words(text) for v in ACTION_VERBS):
-        return "Constraint"
-    if any(term in lower for terms in NON_FUNCTIONAL.values() for term in terms):
-        return "Non-Functional"
-    if any(v in words(text) for v in ACTION_VERBS):
-        return "Functional"
-    if any(term in lower for term in CONSTRAINT_TERMS):
-        return "Constraint"
-    return "Functional"
+    categories = [name for name, terms in CATEGORY_RULES.items() if any(term in lower for term in terms)]
+    if any(term in lower for term in ("shall use", "must use", "technology stack", "framework", "database platform", "budget constraint")):
+        categories.append("Technical Constraint")
+    if re.search(r"\b(as a|i want|so that)\b", lower):
+        categories.append("User Story")
+    if re.search(r"\b(if|when|unless)\b", lower) and re.search(r"\b(then|otherwise)\b", lower):
+        categories.append("Business Rule")
+    if not categories:
+        categories.append("Functional" if set(words(text)) & ACTION_VERBS else "Unclassified")
+    primary = categories[0]
+    if primary in {"Security","Performance","Availability","Reliability","Usability","Compatibility","Maintainability","Privacy","Interface / Integration","Data","Regulatory / Compliance"}:
+        primary = "Non-Functional"
+    return primary, unique(categories)
+
+def add_issue(items, severity, code, message, recommendation):
+    items.append({"severity": severity, "code": code, "message": message, "recommendation": recommendation})
 
 def analyze_text(requirement: str, source: str | None = None, section_number: str | None = None) -> dict:
     text = re.sub(r"\s+", " ", requirement).strip()
@@ -135,155 +153,198 @@ def analyze_text(requirement: str, source: str | None = None, section_number: st
     tokens = words(text)
     token_set = set(tokens)
     sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
-    findings: list[str] = []
-    ambiguities: list[str] = []
-    missing: list[str] = []
-    score = 100
+    issues = []
+    ambiguities, missing, recommendations = [], [], []
+    score_parts = {"clarity": 100, "completeness": 100, "testability": 100, "atomicity": 100, "consistency": 100}
+
+    def issue(severity, code, message, recommendation, dimension="clarity", deduction=5):
+        add_issue(issues, severity, code, message, recommendation)
+        recommendations.append(recommendation)
+        score_parts[dimension] = max(0, score_parts[dimension] - deduction)
 
     if len(tokens) < 5:
-        findings.append("The statement is very short and provides limited context for validation.")
-        missing.append("Add the responsible actor, expected behavior and relevant outcome.")
-        score -= 22
+        issue("high", "TOO_SHORT", "The statement is too short to establish a verifiable requirement.", "Specify the actor, trigger, behavior, and expected outcome.", "completeness", 25)
     elif len(tokens) < 9:
-        findings.append("The requirement contains limited detail.")
-        score -= 8
+        issue("medium", "LOW_DETAIL", "The requirement contains limited context.", "Add relevant preconditions, input conditions, and expected results.", "completeness", 10)
 
     if not MODAL_RE.search(text):
-        findings.append("No explicit obligation or permission term (such as shall, must, or may) is present.")
-        missing.append("Clarify whether this behavior is mandatory, optional or prohibited.")
-        score -= 10
+        issue("medium", "MISSING_MODAL", "No obligation or permission level is stated.", "Use shall/must for mandatory behavior, may for optional behavior, or shall not for prohibition.", "clarity", 10)
+    if not any(re.search(p, lower) for p in ACTOR_PATTERNS):
+        issue("medium", "MISSING_ACTOR", "The responsible actor or system component is not explicit.", "Name the actor or component that performs the behavior.", "clarity", 10)
+        ambiguities.append("Responsible actor is not explicit.")
 
-    has_actor = any(re.search(pattern, lower) for pattern in ACTOR_PATTERNS)
-    if not has_actor:
-        ambiguities.append("The responsible actor or system component is not explicitly identified.")
-        missing.append("Identify the actor or system component responsible for the behavior.")
-        score -= 10
-
-    action_hits = sorted(token_set.intersection(ACTION_VERBS))
+    action_hits = sorted(token_set & ACTION_VERBS)
     if not action_hits:
-        ambiguities.append("The expected action or observable system behavior is not explicit.")
-        missing.append("State the action the system or actor must perform.")
-        score -= 14
+        issue("high", "MISSING_ACTION", "No observable action verb was detected.", "State what the system or actor shall do in observable terms.", "completeness", 18)
+        ambiguities.append("Expected behavior is not explicit.")
 
-    vague_found = []
-    for phrase, recommendation in VAGUE_TERMS.items():
+    for phrase, advice in VAGUE.items():
         if re.search(r"\b" + re.escape(phrase) + r"\b", lower):
-            vague_found.append((phrase, recommendation))
-            ambiguities.append(f"The term '{phrase}' is subjective or insufficiently measurable.")
-            missing.append(recommendation)
-            score -= 7
+            issue("medium", "VAGUE_TERM", f"The term '{phrase}' is subjective or underspecified.", advice, "clarity", 7)
+            ambiguities.append(f"Vague term: {phrase}.")
 
-    if any(term in token_set for term in ABSOLUTE_TERMS) and not MEASURE_RE.search(text):
-        ambiguities.append("Absolute wording may create an overly broad obligation; confirm its intended scope.")
-        score -= 4
+    if re.search(r"\b(it|they|them|this|that|these|those)\b", lower):
+        issue("low", "UNCLEAR_REFERENCE", "A pronoun may refer to more than one entity.", "Replace pronouns with the exact system, user, record, service, or data item.", "clarity", 3)
 
-    if not any(word in lower for word in BOUNDARY_WORDS) and len(tokens) > 12:
-        missing.append("Consider documenting relevant preconditions, triggering events or exception conditions.")
-        score -= 4
-
-    has_measure = bool(MEASURE_RE.search(text))
-    is_quality_requirement = any(term in lower for terms in NON_FUNCTIONAL.values() for term in terms)
-    if is_quality_requirement and not has_measure:
-        missing.append("Add a measurable acceptance threshold for the stated quality attribute.")
-        score -= 12
-
-    if len(sentences) > 2:
-        ambiguities.append("The statement combines multiple clauses; consider separating independently testable obligations.")
-        score -= min(8, (len(sentences) - 2) * 3)
+    if re.search(r"\b(and/or|etc\.?|various|several|some|many)\b", lower):
+        issue("medium", "OPEN_ENDED_SCOPE", "Open-ended wording can leave the scope open to interpretation.", "Enumerate the included cases or define an explicit scope boundary.", "completeness", 6)
 
     conjunctions = len(re.findall(r"\b(and|or)\b", lower))
-    if conjunctions >= 3:
-        ambiguities.append("Several conditions or actions are joined together, which may make verification difficult.")
-        score -= 5
+    if len(sentences) > 2 or conjunctions >= 4 or len(action_hits) >= 4:
+        issue("medium", "POSSIBLE_NON_ATOMIC", "The statement may combine multiple independent behaviors or conditions.", "Split it into one independently verifiable obligation per requirement ID.", "atomicity", 12)
 
-    if len(text) > 500:
-        findings.append("The requirement is lengthy; consider splitting it into smaller independently verifiable statements.")
-        score -= 4
+    if len(text) > 600:
+        issue("low", "LONG_REQUIREMENT", "The requirement is unusually long and may contain multiple obligations.", "Split the statement while preserving dependencies between the resulting requirements.", "atomicity", 5)
 
-    if not any(term in lower for term in TEST_WORDS) and not has_measure and len(tokens) > 8:
-        missing.append("Define an observable pass/fail outcome so a tester can verify compliance.")
-        score -= 5
+    has_measure = bool(NUMBER_UNIT_RE.search(text))
+    has_condition = any(re.search(r"\b" + re.escape(term) + r"\b", lower) for term in BOUNDARIES)
+    has_outcome = bool(re.search(r"\b(display|return|show|reject|accept|save|store|send|notify|prevent|allow|record|create|update|delete)\b", lower))
+    if len(tokens) >= 9 and not has_condition:
+        issue("low", "NO_TRIGGER_OR_PRECONDITION", "No trigger or precondition is apparent.", "State when the requirement applies, including relevant preconditions and exception paths.", "completeness", 4)
+    if len(tokens) >= 9 and not has_outcome:
+        issue("medium", "NO_OBSERVABLE_OUTCOME", "The expected observable result is not clear.", "Describe the output, state change, response, or externally observable result.", "testability", 10)
 
-    # Deduplicate while preserving order.
-    ambiguities = list(dict.fromkeys(ambiguities))
-    missing = list(dict.fromkeys(missing))
-    findings = list(dict.fromkeys(findings))
+    primary, categories = classify(text)
+    quality = [c for c in categories if c in CATEGORY_RULES]
+    for category in quality:
+        if category == "Performance":
+            if not has_measure:
+                issue("high", "PERFORMANCE_WITHOUT_TARGET", "Performance requirement has no measurable target or unit.", "Specify a maximum response time, throughput, workload, and measurement conditions.", "testability", 18)
+            if not re.search(r"\b(response|latency|throughput|load|process|complete|requests?)\b", lower):
+                issue("low", "PERFORMANCE_METRIC_UNCLEAR", "The performance metric is not clearly identified.", "Name the measured operation and metric, such as p95 response time or requests per second.", "testability", 5)
+        elif category == "Security":
+            controls = ["encrypt", "authentication", "authorization", "role", "access control", "multi-factor", "mfa", "audit", "session"]
+            if not any(c in lower for c in controls):
+                issue("high", "SECURITY_CONTROL_UNSPECIFIED", "Security is mentioned without a concrete control.", "Specify the control, protected asset, actor permissions, and expected denial behavior.", "completeness", 15)
+            if not any(c in lower for c in ["unauthorized", "unauthorised", "role", "permission", "access", "encrypt", "authentication", "authorization"]):
+                issue("medium", "SECURITY_NEGATIVE_CASE_MISSING", "Unauthorized access or misuse behavior is not addressed.", "Define how unauthorized requests are rejected and logged.", "testability", 8)
+        elif category == "Availability":
+            if not re.search(r"\b\d+(?:\.\d+)?\s*%\b|\b(uptime|downtime|minutes? per month|hours? per month)\b", lower):
+                issue("high", "AVAILABILITY_TARGET_MISSING", "Availability is not expressed as a measurable service target.", "Specify uptime percentage over a defined measurement period and planned-maintenance treatment.", "testability", 15)
+        elif category == "Reliability":
+            if not any(c in lower for c in ["recovery", "failure rate", "retry", "fault", "backup", "restore", "data loss", "mtbf", "mttr", "rpo", "rto"]):
+                issue("medium", "RELIABILITY_BEHAVIOR_MISSING", "Reliability is mentioned without a failure or recovery behavior.", "Define failure handling, retry limits, recovery time, and acceptable data loss.", "completeness", 10)
+        elif category == "Usability":
+            if not any(c in lower for c in ["task", "complete", "click", "steps", "screen reader", "keyboard", "wcag", "accessible", "learn"]):
+                issue("medium", "USABILITY_CRITERIA_MISSING", "Usability has no concrete user task or accessibility criterion.", "Define target users, task success rate, maximum steps/time, and accessibility standard where applicable.", "testability", 10)
+        elif category == "Compatibility":
+            if not any(c in lower for c in ["chrome", "firefox", "safari", "edge", "windows", "linux", "macos", "android", "ios", "version", "browser", "device"]):
+                issue("medium", "COMPATIBILITY_MATRIX_MISSING", "Compatibility is not tied to named platforms or versions.", "List supported devices, operating systems, browsers, and minimum versions.", "completeness", 10)
+        elif category == "Privacy":
+            if not any(c in lower for c in ["consent", "retention", "delete", "erase", "anonym", "encrypt", "access", "purpose"]):
+                issue("high", "PRIVACY_CONTROL_MISSING", "Personal-data handling is mentioned without a clear privacy control.", "Specify purpose, consent/legal basis, access restrictions, retention period, and deletion behavior.", "completeness", 15)
+        elif category == "Interface / Integration":
+            if not any(c in lower for c in ["request", "response", "json", "xml", "http", "endpoint", "webhook", "schema", "status code", "timeout"]):
+                issue("medium", "INTERFACE_CONTRACT_MISSING", "The integration requirement lacks a defined interface contract.", "Specify protocol, endpoint/event, payload schema, success response, errors, timeout, and retry behavior.", "testability", 10)
+        elif category == "Data":
+            if not any(c in lower for c in ["valid", "required", "format", "unique", "range", "backup", "restore", "retention", "schema"]):
+                issue("medium", "DATA_RULE_MISSING", "Data behavior lacks explicit validation, integrity, or lifecycle rules.", "Define field constraints, formats, uniqueness, retention, backup, and invalid-data behavior.", "completeness", 9)
+        elif category == "Regulatory / Compliance":
+            if not re.search(r"\b(iso\s*\d+|pci\s*dss|hipaa|gdpr|wcag|section\s*508|rbi|fssai)\b", lower):
+                issue("medium", "STANDARD_NOT_NAMED", "Compliance is mentioned without identifying the applicable standard or regulation.", "Name the applicable regulation/standard, version, scope, and evidence required for compliance.", "completeness", 10)
+        elif category == "Maintainability":
+            if not any(c in lower for c in ["logging", "monitoring", "modular", "document", "deployment", "diagnostic", "maintain"]):
+                issue("medium", "MAINTAINABILITY_MEASURE_MISSING", "Maintainability has no concrete engineering or operational criterion.", "Specify measurable maintainability expectations such as diagnostic coverage, deployment time, or module boundaries.", "testability", 8)
 
-    score = max(0, min(100, score))
-    if score >= 85:
-        clarity, completeness, testability = "Good", "Complete" if not missing else "Partial", "Testable" if not missing else "Partially Testable"
-    elif score >= 65:
-        clarity, completeness, testability = "Moderate", "Partial", "Partially Testable"
-    else:
-        clarity, completeness, testability = "Poor", "Incomplete", "Not Testable" if not action_hits else "Partially Testable"
+    if "Technical Constraint" in categories and not any(term in lower for term in ["version", "must use", "shall use", "compatible", "hosted", "deployed"]):
+        issue("low", "CONSTRAINT_SCOPE_UNCLEAR", "A constraint is present but its applicability or boundary may be unclear.", "State whether the constraint is mandatory, its scope, and any approved exceptions.", "completeness", 4)
 
-    classification = classify(text)
-    if not findings and not ambiguities and not missing:
-        findings.append("No major textual quality issue was detected by the analyzer; validate the requirement against stakeholder needs and related requirements.")
+    if "User Story" in categories and not re.search(r"\b(so that|in order to)\b", lower):
+        issue("low", "USER_STORY_VALUE_MISSING", "The user story may not explain the user value or business outcome.", "Add the 'so that' benefit or expected business outcome.", "completeness", 5)
 
-    issues = findings + [f"Ambiguity: {item}" for item in ambiguities]
+    if not re.search(r"\b(error|invalid|fail|failure|reject|unavailable|timeout|exception|unauthorized)\b", lower) and len(tokens) > 12:
+        issue("low", "EXCEPTION_PATH_NOT_STATED", "No error or exception path is described.", "Consider defining invalid input, unavailable dependency, timeout, and recovery behavior where relevant.", "completeness", 4)
+
+    if re.search(r"\b(always|never|all|any|every|none)\b", lower) and not re.search(r"\b(all|any|every|none)\s+(users?|records?|requests?|cases?|transactions?)\b", lower):
+        issue("low", "ABSOLUTE_SCOPE", "Absolute wording may create an unexpectedly broad obligation.", "Define the exact population, scope, and exceptions covered by the absolute term.", "clarity", 3)
+
+    # Derive quality indicators from independent dimensions; do not present this as model confidence.
+    dimensions = score_parts
+    overall = round(sum(dimensions.values()) / len(dimensions))
+    ambiguities = unique(ambiguities + [x["message"] for x in issues if x["code"] in {"VAGUE_TERM","UNCLEAR_REFERENCE","MISSING_ACTOR","MISSING_ACTION"}])
+    missing = unique(missing + recommendations)
+    if dimensions["clarity"] >= 85: clarity = "Good"
+    elif dimensions["clarity"] >= 65: clarity = "Moderate"
+    else: clarity = "Poor"
+    if dimensions["completeness"] >= 85: completeness = "Complete"
+    elif dimensions["completeness"] >= 60: completeness = "Partial"
+    else: completeness = "Incomplete"
+    if dimensions["testability"] >= 85: testability = "Testable"
+    elif dimensions["testability"] >= 60: testability = "Partially Testable"
+    else: testability = "Not Testable"
+
     if not issues:
-        issues = ["No significant issue was detected by the configured textual checks."]
+        add_issue(issues, "info", "NO_RULE_TRIGGERED", "No major issue was detected by the configured checks.", "Review this requirement with stakeholders and validate it against related requirements.")
 
+    # Suggestions never invent domain-specific thresholds or business rules.
     rewrite = text
-    if missing or ambiguities:
-        actor = "The system"
-        if re.search(r"\buser\b", lower):
-            actor = "The user"
-        elif re.search(r"\badministrator\b|\badmin\b", lower):
-            actor = "The administrator"
-        modal = "shall"
-        action = " ".join(sentences)
-        if not MODAL_RE.search(text):
-            rewrite = f"{actor} shall {action[0].lower() + action[1:] if action else text}"
-        elif not has_actor and action_hits:
-            rewrite = f"{actor} {action}"
-        # Preserve original meaning; do not invent numeric thresholds or business rules.
-        if rewrite == text:
-            rewrite = text + " [Add explicit acceptance criteria for the identified missing details.]"
+    if any(x["severity"] in {"high", "medium"} for x in issues):
+        rewrite = text + " [Refine using the recommendations below; confirm all thresholds and business rules with stakeholders.]"
 
-    explanation_parts = [
-        f"Classified as {classification.lower()} based on the requirement's wording and detected subject matter.",
-        f"Text length: {len(tokens)} words across {len(sentences)} sentence(s).",
-        f"Detected {len(action_hits)} action verb(s)" + (f" ({', '.join(action_hits[:5])})" if action_hits else "") + ".",
-        "A measurable value is present." if has_measure else "No explicit numeric performance or quantity threshold was detected.",
-        f"Quality score: {score}/100. This score reflects textual clarity, completeness and testability signals, not proof of implementation correctness.",
-    ]
+    explanation = (
+        f"Detected category: {', '.join(categories)}. "
+        f"Analyzed {len(tokens)} words in {len(sentences)} sentence(s); "
+        f"detected action verbs: {', '.join(action_hits[:8]) if action_hits else 'none'}. "
+        f"Numeric/unit threshold detected: {'yes' if has_measure else 'no'}. "
+        "Scores are deterministic text-quality indicators from configured rules, not model confidence or proof of correctness."
+    )
     if source or section_number:
-        explanation_parts.append(f"Document context: source={source or 'not supplied'}, section={section_number or 'not supplied'}.")
+        explanation += f" Document context: source={source or 'not supplied'}, section={section_number or 'not supplied'}."
 
     return {
-        "quality_score": score,
-        "classification": classification,
+        "quality_score": overall,
+        "classification": primary,
+        "categories": categories,
         "clarity": clarity,
         "completeness": completeness,
         "testability": testability,
+        "dimension_scores": dimensions,
         "ambiguities": ambiguities,
         "missing_information": missing,
         "issues": issues,
+        "issue_count": len([x for x in issues if x["severity"] != "info"]),
         "suggested_rewrite": rewrite,
-        "explanation": " ".join(explanation_parts),
+        "explanation": explanation,
     }
+
+def cross_requirement_checks(requirements: list[str], analyses: list[dict]) -> list[dict]:
+    findings = []
+    normalized = [re.sub(r"[^a-z0-9 ]", " ", r.lower()) for r in requirements]
+    for i in range(len(requirements)):
+        for j in range(i + 1, len(requirements)):
+            a, b = normalized[i], normalized[j]
+            ta = {w for w in words(a) if w not in STOP and len(w) > 2}
+            tb = {w for w in words(b) if w not in STOP and len(w) > 2}
+            if not ta or not tb:
+                continue
+            overlap = len(ta & tb) / max(1, min(len(ta), len(tb)))
+            if overlap >= 0.82:
+                findings.append({
+                    "type": "possible_duplicate",
+                    "severity": "medium",
+                    "requirements": [i + 1, j + 1],
+                    "message": "These requirements use highly similar key terms and may duplicate the same obligation.",
+                    "recommendation": "Compare their actors, triggers, outcomes, and acceptance criteria; merge or distinguish them if appropriate.",
+                })
+            # Flag opposing explicit modal/polarity for strongly overlapping topics.
+            opposing = (("shall not" in a or "must not" in a) and ("shall " in b or "must " in b) and not ("shall not" in b or "must not" in b)) or (("shall not" in b or "must not" in b) and ("shall " in a or "must " in a) and not ("shall not" in a or "must not" in a))
+            if overlap >= 0.55 and opposing:
+                findings.append({
+                    "type": "possible_conflict",
+                    "severity": "high",
+                    "requirements": [i + 1, j + 1],
+                    "message": "These requirements may impose opposing obligations on a similar subject.",
+                    "recommendation": "Review scope, actors, conditions, priorities, and exceptions with the requirement owner before treating this as a confirmed conflict.",
+                })
+    return findings
 
 @app.get("/")
 def home():
-    return {
-        "message": "SRS Requirement Analyzer is running",
-        "version": VERSION,
-        "provider": "built-in NLP analysis engine",
-        "mode": "model-free",
-    }
+    return {"message": "SRS Requirement Analyzer is running", "version": VERSION, "provider": "built-in NLP analysis engine", "mode": "model-free"}
 
 @app.get("/health")
 def health():
-    return {
-        "status": "ok",
-        "service": "SRS AI Analyzer",
-        "version": VERSION,
-        "provider": "built-in NLP analysis engine",
-        "mode": "model-free",
-        "internal_auth_configured": bool(SRS_API_KEY),
-    }
+    return {"status": "ok", "service": "SRS AI Analyzer", "version": VERSION, "provider": "built-in NLP analysis engine", "mode": "model-free", "internal_auth_configured": bool(SRS_API_KEY)}
 
 @app.post("/analyze")
 async def analyze(request: AnalyzeRequest, _: None = Depends(verify_api_key)):
@@ -294,28 +355,24 @@ async def analyze(request: AnalyzeRequest, _: None = Depends(verify_api_key)):
         raise HTTPException(status_code=400, detail="Please provide requirement text")
     requirement = requirement.strip()
     result = analyze_text(requirement, request.source, request.section_number)
-    return {
-        "status": "success",
-        "provider": "built-in NLP analysis engine",
-        "model": None,
-        "requirement": requirement,
-        "analysis": result,
-    }
+    return {"status": "success", "provider": "built-in NLP analysis engine", "model": None, "requirement": requirement, "analysis": result}
 
 @app.post("/analyze-batch")
 async def analyze_batch(request: BatchAnalyzeRequest, _: None = Depends(verify_api_key)):
     analyses = []
     for index, requirement in enumerate(request.requirements):
         result = analyze_text(requirement)
-        analyses.append({
-            "requirement_number": index + 1,
-            "requirement": requirement,
-            **result,
-        })
+        analyses.append({"requirement_number": index + 1, "requirement": requirement, **result})
+    category_counts = Counter(category for item in analyses for category in item["categories"])
+    cross_findings = cross_requirement_checks(request.requirements, analyses)
+    average_score = round(sum(item["quality_score"] for item in analyses) / len(analyses))
     return {
         "status": "success",
         "provider": "built-in NLP analysis engine",
         "model": None,
         "total_requirements": len(request.requirements),
+        "average_quality_score": average_score,
+        "category_summary": dict(category_counts),
+        "cross_requirement_findings": cross_findings,
         "analyses": analyses,
     }

@@ -1,8 +1,8 @@
 package com.reqvalidator.backend.controller;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -66,10 +66,10 @@ public class AuthController {
         user.setName(user.getName().trim());
 
         try {
-            Optional<User> existingUser = userRepository.findByEmail(email);
-            if (existingUser.isPresent()) {
+            List<User> existingUsers = userRepository.findAllByEmailIgnoreCase(email);
+            if (!existingUsers.isEmpty()) {
                 return ResponseEntity.status(HttpStatus.CONFLICT)
-                        .body("An account with this email already exists.");
+                        .body("An account with this email already exists. Please log in.");
             }
 
             user.setPassword(passwordEncoder.encode(user.getPassword()));
@@ -111,19 +111,32 @@ public class AuthController {
         try {
             log.info("Login request received.");
 
-            Optional<User> userOptional = userRepository.findByEmail(email);
-            if (userOptional.isEmpty()) {
+            List<User> matchingUsers = userRepository.findAllByEmailIgnoreCase(email);
+            if (matchingUsers.isEmpty()) {
                 log.info("Login rejected: account was not found.");
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                         .body("Invalid email or password.");
             }
 
-            User user = userOptional.get();
-            if (user.getPassword() == null
-                    || !passwordEncoder.matches(loginUser.getPassword(), user.getPassword())) {
-                log.info("Login rejected: password did not match.");
+            // Older deployments may already contain duplicate email records.
+            // Match the supplied password against each record instead of
+            // requiring MongoDB to return exactly one document.
+            User user = matchingUsers.stream()
+                    .filter(candidate -> candidate.getPassword() != null
+                            && passwordEncoder.matches(
+                                    loginUser.getPassword(),
+                                    candidate.getPassword()))
+                    .findFirst()
+                    .orElse(null);
+
+            if (user == null) {
+                log.info("Login rejected: password did not match any account record.");
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                         .body("Invalid email or password.");
+            }
+
+            if (matchingUsers.size() > 1) {
+                log.warn("Multiple user records share an email address; login matched one existing record. Duplicate records should be cleaned up.");
             }
 
             String token = jwtService.generateToken(user.getEmail());

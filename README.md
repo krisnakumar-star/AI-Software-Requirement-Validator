@@ -92,7 +92,15 @@ mongodb://localhost:27017/requirement_validator
 
 ### 3. Configure and run the AI service
 
-Copy `ai-service/.env.example` to `ai-service/.env` if it does not already exist, then set `HF_TOKEN`, `HF_MODEL`, and a private random `SRS_API_KEY`. Choose a model/provider enabled for your Hugging Face account. The service uses `https://router.huggingface.co/v1` and never sends the Hugging Face token to React. Verify model access by submitting a real `/analyze` request.
+The FastAPI service calls JarvisClaw's OpenAI-compatible Chat Completions API at `https://api.jarvisclaw.ai/v1/chat/completions`.
+
+Create `ai-service/.env` from `.env.example` and configure:
+
+- `SRS_API_KEY`: a private random key shared with the backend's `LLM_API_KEY`.
+- `JARVISCLAW_API_KEY`: your JarvisClaw API key (starts with `sk-`). This provider credential is different from `SRS_API_KEY`.
+- `LLM_MODEL`: a model identifier available in your JarvisClaw account; `auto` uses the provider's smart router.
+
+Never commit either key. In Render, set these as environment variables on the AI service. The backend must have `LLM_API_KEY` equal to the AI service's `SRS_API_KEY`.
 
 ```powershell
 cd ai-service
@@ -103,7 +111,7 @@ if (!(Test-Path .env)) { Copy-Item .env.example .env }
 uvicorn main:app --host 0.0.0.0 --port 8001
 ```
 
-Edit `.env` before relying on analysis. Keep it out of source control.
+Verify `/health` reports both internal authentication and provider API key configuration before testing a real `/analyze` request.
 
 ### 4. Run Spring Boot
 

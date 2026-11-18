@@ -250,7 +250,8 @@ function ValidationResults() {
     setLocalModelProgress("Loading the open-weight Qwen model into your browser. The first download may take a few minutes.");
 
     try {
-      const { generateSrsReview } = await import("../services/localSrsModel");
+      // Keep model code out of the initial bundle; this module exists on the current main branch.
+      const { generateSrsReview } = await import("../services/localSrsModel.js");
       const items = llmResults.length > 0
         ? llmResults
         : requirements.map((item) => ({

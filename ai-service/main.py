@@ -750,7 +750,7 @@ def health():
         "provider": "Local SRS Rule Engine",
         "model": ANALYSIS_ENGINE,
         "internal_auth_configured": bool(SRS_API_KEY),
-        "provider_api_key_configured": True,
+        "external_provider_required": False,
         "analysis_mode": "offline_rules"
     }
 

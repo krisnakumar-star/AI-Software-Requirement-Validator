@@ -5,11 +5,13 @@ A web application for managing and reviewing Software Requirements Specification
 ## Analysis service
 
 The FastAPI service provides:
-- Requirement classification: Functional, Non-Functional and Constraint.
-- Textual clarity, completeness and testability assessment.
-- Detection of vague language, missing actors/actions, weak acceptance criteria and broad compound statements.
-- Requirement-specific findings, explanation and a suggested rewrite.
-- Single and batch analysis using the existing API contract.
+- Multi-label classification for functional, non-functional quality attributes, technical constraints, user stories, business rules, data, interface/integration, privacy and compliance requirements.
+- Separate clarity, completeness, testability, atomicity and consistency indicator scores.
+- Attribute-specific checks for performance, security, availability, reliability, usability, compatibility, maintainability, privacy, integrations, data rules and standards compliance.
+- Detection of vague wording, missing actors/actions, unclear references, open-ended scope, compound requirements, missing triggers/outcomes, weak measurable targets and missing exception paths.
+- Severity-coded findings with recommendations, explanations, and cautious rewrite guidance that does not invent stakeholder thresholds.
+- Batch-level category summaries, average score, possible duplicate detection and possible cross-requirement conflicts.
+- Existing single-analysis response fields are preserved; detailed findings are exposed separately for richer clients.
 
 **Implementation note:** the current analyzer is a deterministic, model-free NLP/heuristic engine. It does not download model weights, call an external AI provider, require paid API credits, or claim to be a generative LLM. Its score is a textual quality indicator and should be reviewed by a requirements engineer.
 

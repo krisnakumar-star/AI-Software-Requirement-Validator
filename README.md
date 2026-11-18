@@ -76,7 +76,7 @@ Install the following before running the application:
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/krisnakumar-star/AI-Software-Requirement-Validator.git
+git clone https://github.com/Rakshali-p09/AI-Software-Requirement-Validator.git
 cd AI-Software-Requirement-Validator
 ```
 
@@ -92,13 +92,15 @@ mongodb://localhost:27017/requirement_validator
 
 ### 3. Configure and run the AI service
 
-The FastAPI service includes an offline, deterministic SRS analysis engine. It does not call an external LLM provider and does not require Groq, JarvisClaw, a provider API key, or paid AI credits.
+The FastAPI service calls JarvisClaw's OpenAI-compatible Chat Completions API at `https://api.jarvisclaw.ai/v1/chat/completions`.
 
-Set `SRS_API_KEY` on the AI service. This private internal key must match the backend's `LLM_API_KEY` value.
+Create `ai-service/.env` from `.env.example` and configure:
 
-The local analyzer evaluates requirement wording, actors, obligation language, measurable criteria, ambiguity indicators, completeness signals, testability, and likely requirement classification. It returns a structured quality assessment, issues, missing information, and a suggested rewrite. Its results are heuristic rather than generative-LLM output and should be reviewed by a requirements engineer.
+- `SRS_API_KEY`: a private random key shared with the backend's `LLM_API_KEY`.
+- `JARVISCLAW_API_KEY`: your JarvisClaw API key (starts with `sk-`). This provider credential is different from `SRS_API_KEY`.
+- `LLM_MODEL`: a model identifier available in your JarvisClaw account; `auto` uses the provider's smart router.
 
-Create `ai-service/.env` from `.env.example`, set `SRS_API_KEY`, then run:
+Never commit either key. In Render, set these as environment variables on the AI service. The backend must have `LLM_API_KEY` equal to the AI service's `SRS_API_KEY`.
 
 ```powershell
 cd ai-service
@@ -109,7 +111,7 @@ if (!(Test-Path .env)) { Copy-Item .env.example .env }
 uvicorn main:app --host 0.0.0.0 --port 8001
 ```
 
-On Render, set `SRS_API_KEY` on the AI service and set the same value as `LLM_API_KEY` on the Spring Boot backend. No external provider key is needed.
+Verify `/health` reports both internal authentication and provider API key configuration before testing a real `/analyze` request.
 
 ### 4. Run Spring Boot
 
@@ -163,9 +165,9 @@ The backend uses `mongodb://localhost:27017/requirement_validator` by default. S
 
 ## Author
 
-**Krishna Kumar V**
+**Rakshali Patidar**
 
-GitHub: [Rakshali-p09](https://github.com/krisnakumar-star)
+GitHub: [Rakshali-p09](https://github.com/Rakshali-p09)
 
 ## License
 

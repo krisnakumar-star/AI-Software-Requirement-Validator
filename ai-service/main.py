@@ -14,7 +14,7 @@ load_dotenv()
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("srs-analyzer")
 
-VERSION = "8.0.0"
+VERSION = "9.0.0"
 SRS_API_KEY = os.getenv("SRS_API_KEY")
 app = FastAPI(
     title="SRS Requirement Analyzer",
@@ -308,6 +308,145 @@ def analyze_text(requirement: str, source: str | None = None, section_number: st
         "explanation": explanation,
     }
 
+def build_expert_review(requirement: str, analysis: dict) -> dict:
+    """Create a readable, evidence-linked review from detected rule results."""
+    findings = analysis.get("detailed_findings", [])
+    high = [item for item in findings if item.get("severity") == "high"]
+    medium = [item for item in findings if item.get("severity") == "medium"]
+    low = [item for item in findings if item.get("severity") == "low"]
+    categories = analysis.get("categories", [])
+    dimensions = analysis.get("dimension_scores", {})
+    primary = analysis.get("classification", "Unclassified")
+
+    if high:
+        verdict = "Needs substantial revision"
+        risk = "High"
+        summary = f"This requirement has {len(high)} high-severity concern(s). Resolve these before treating it as implementation-ready."
+    elif medium:
+        verdict = "Needs clarification"
+        risk = "Moderate"
+        summary = f"The requirement is understandable at a high level, but {len(medium)} medium-severity concern(s) could lead to inconsistent implementation or testing."
+    elif low:
+        verdict = "Review recommended"
+        risk = "Low"
+        summary = "No high-severity issue was detected, although some refinements would improve precision and verification."
+    else:
+        verdict = "No major textual issue detected"
+        risk = "Low"
+        summary = "The configured checks found no major textual defect. Stakeholder validation and cross-document review are still required."
+
+    strengths = []
+    if re.search(r"\\b(shall|must|will|should|may)\\b", requirement, re.I):
+        strengths.append("A requirement modality is stated.")
+    if any(re.search(p, requirement.lower()) for p in ACTOR_PATTERNS):
+        strengths.append("A responsible actor or component is identified.")
+    if set(words(requirement)) & ACTION_VERBS:
+        strengths.append("An observable action verb is present.")
+    if NUMBER_UNIT_RE.search(requirement):
+        strengths.append("At least one numeric value with a recognized unit is present.")
+    if not strengths:
+        strengths.append("The statement provides source text that can be refined into a verifiable requirement.")
+
+    questions = []
+    codes = {item.get("code") for item in findings}
+    if "MISSING_ACTOR" in codes:
+        questions.append("Which actor or system component owns this behavior?")
+    if "MISSING_MODAL" in codes:
+        questions.append("Is this behavior mandatory, optional, recommended, or prohibited?")
+    if any(code in codes for code in ("VAGUE_TERM", "PERFORMANCE_WITHOUT_TARGET", "AVAILABILITY_TARGET_MISSING")):
+        questions.append("What measurable threshold, unit, measurement period, and operating conditions should apply?")
+    if "NO_TRIGGER_OR_PRECONDITION" in codes:
+        questions.append("What event or precondition causes this requirement to apply?")
+    if any(code in codes for code in ("NO_OBSERVABLE_OUTCOME", "MISSING_ACTION")):
+        questions.append("What observable result should a tester verify?")
+    if "EXCEPTION_PATH_NOT_STATED" in codes:
+        questions.append("What should happen for invalid input, unavailable dependencies, timeouts, or other failure cases?")
+    if "SECURITY_NEGATIVE_CASE_MISSING" in codes:
+        questions.append("How should unauthorized or invalid access attempts be denied and recorded?")
+    if "INTERFACE_CONTRACT_MISSING" in codes:
+        questions.append("What are the interface protocol, request/response schema, error contract, timeout, and retry rules?")
+    if "COMPATIBILITY_MATRIX_MISSING" in codes:
+        questions.append("Which exact platforms, browser versions, devices, and minimum versions are supported?")
+    if "PRIVACY_CONTROL_MISSING" in codes:
+        questions.append("What is the data purpose, lawful basis or consent, retention period, and deletion process?")
+    if not questions:
+        questions.append("Have the requirement owner and tester agreed on the expected behavior and acceptance evidence?")
+
+    subject = "the specified actor or system component"
+    actor_match = re.search(r"\\b(the system|the application|the platform|the service|the user|the administrator|admin|customer|manager|operator)\\b", requirement, re.I)
+    if actor_match:
+        subject = actor_match.group(0)
+    action = next((verb for verb in words(requirement) if verb in ACTION_VERBS), "perform the specified behavior")
+    test_scenarios = [
+        {
+            "id": "TC-01",
+            "type": "Positive",
+            "purpose": "Verify the stated behavior under its intended valid conditions.",
+            "steps": ["Establish the preconditions agreed by the requirement owner.", f"Ask {subject} to {action} as described in the requirement.", "Observe the system response and compare it with the agreed expected result."],
+            "expected_result": "The specified behavior occurs and the observable outcome matches the approved acceptance criteria.",
+            "note": "Expected details must be confirmed; the analyzer does not invent business rules."
+        },
+        {
+            "id": "TC-02",
+            "type": "Negative / boundary",
+            "purpose": "Check handling of invalid, missing, unauthorized, or boundary inputs where applicable.",
+            "steps": ["Prepare an invalid or boundary condition relevant to this requirement.", "Execute the same behavior.", "Observe the response, state changes, and any error handling."],
+            "expected_result": "The system follows the error and boundary behavior defined by the approved specification.",
+            "note": "Select applicable cases with the product owner; not every requirement needs every negative case."
+        },
+        {
+            "id": "TC-03",
+            "type": "Regression",
+            "purpose": "Check that satisfying this requirement does not break related behavior.",
+            "steps": ["Run the requirement's approved positive test.", "Run tests for related requirements and integrations.", "Compare outputs and persisted state with their expected results."],
+            "expected_result": "This requirement and related approved behaviors continue to pass."
+        }
+    ]
+
+    prioritized = [
+        {"priority": "P1", "action": item["recommendation"], "reason": item["message"]}
+        for item in high
+    ] + [
+        {"priority": "P2", "action": item["recommendation"], "reason": item["message"]}
+        for item in medium
+    ] + [
+        {"priority": "P3", "action": item["recommendation"], "reason": item["message"]}
+        for item in low
+    ]
+
+    return {
+        "review_verdict": verdict,
+        "risk_level": risk,
+        "executive_summary": summary,
+        "requirement_type_interpretation": {
+            "primary_type": primary,
+            "detected_categories": categories,
+            "interpretation": f"The wording most strongly matches {primary.lower()} requirement characteristics. Category matching is rule-based and should be confirmed by a reviewer."
+        },
+        "strengths": strengths,
+        "dimension_assessment": [
+            {"dimension": name, "score": value, "interpretation": "Strong" if value >= 85 else "Needs attention" if value >= 65 else "Weak"}
+            for name, value in dimensions.items()
+        ],
+        "detailed_reasoning": [
+            {"finding": item["message"], "why_it_matters": f"This may affect {item['code'].lower().replace('_', ' ')} and create ambiguity for implementation or verification.", "recommended_action": item["recommendation"], "severity": item["severity"]}
+            for item in findings
+        ],
+        "questions_for_requirement_owner": unique(questions),
+        "suggested_acceptance_criteria": [
+            {"id": "AC-01", "given": "The agreed preconditions and valid input are present", "when": f"{subject} performs the stated behavior", "then": "The observable outcome matches the acceptance rule approved by the requirement owner."},
+            {"id": "AC-02", "given": "An invalid or out-of-scope condition occurs, where applicable", "when": "The behavior is attempted", "then": "The system follows the explicitly approved error-handling rule without an unintended state change."}
+        ],
+        "illustrative_test_scenarios": test_scenarios,
+        "prioritized_improvement_plan": prioritized,
+        "review_limitations": [
+            "This review is generated by deterministic linguistic patterns and expert-authored rules, not by a trained generative language model.",
+            "A detected issue is a review signal, not proof that the requirement is defective; a missing signal is not proof of correctness.",
+            "Numeric thresholds, business policies, legal obligations, and domain assumptions must be confirmed with stakeholders."
+        ]
+    }
+
+
 def cross_requirement_checks(requirements: list[str], analyses: list[dict]) -> list[dict]:
     findings = []
     normalized = [re.sub(r"[^a-z0-9 ]", " ", r.lower()) for r in requirements]
@@ -356,6 +495,7 @@ async def analyze(request: AnalyzeRequest, _: None = Depends(verify_api_key)):
         raise HTTPException(status_code=400, detail="Please provide requirement text")
     requirement = requirement.strip()
     result = analyze_text(requirement, request.source, request.section_number)
+    result["expert_review"] = build_expert_review(requirement, result)
     return {"status": "success", "provider": "built-in NLP analysis engine", "model": None, "requirement": requirement, "analysis": result}
 
 @app.post("/analyze-batch")
@@ -363,6 +503,7 @@ async def analyze_batch(request: BatchAnalyzeRequest, _: None = Depends(verify_a
     analyses = []
     for index, requirement in enumerate(request.requirements):
         result = analyze_text(requirement)
+        result["expert_review"] = build_expert_review(requirement, result)
         analyses.append({"requirement_number": index + 1, "requirement": requirement, **result})
     category_counts = Counter(category for item in analyses for category in item["categories"])
     cross_findings = cross_requirement_checks(request.requirements, analyses)

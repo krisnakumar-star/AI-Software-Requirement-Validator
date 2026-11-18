@@ -28,8 +28,9 @@ app = FastAPI(
 # ==================================================
 
 LLM_BASE_URL = "https://api.jarvisclaw.ai/v1/chat/completions"
-LLM_MODEL = os.getenv("LLM_MODEL", "auto/free")
+LLM_MODEL = os.getenv("LLM_MODEL", "auto")
 SRS_API_KEY = os.getenv("SRS_API_KEY")
+JARVISCLAW_API_KEY = os.getenv("JARVISCLAW_API_KEY")
 LLM_TIMEOUT = 90.0
 logger = logging.getLogger("requirement-validator.jarvisclaw")
 
@@ -306,6 +307,12 @@ async def call_llm(
         "max_tokens": 2500
     }
 
+    if not JARVISCLAW_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="JarvisClaw provider API key is not configured. Set JARVISCLAW_API_KEY on the AI service."
+        )
+
     try:
 
         async with httpx.AsyncClient(
@@ -316,7 +323,8 @@ async def call_llm(
                 LLM_BASE_URL,
                 json=payload,
                 headers={
-                    "Content-Type": "application/json"
+                    "Content-Type": "application/json",
+                    "Authorization": f"Bearer {JARVISCLAW_API_KEY}"
                 }
             )
 
@@ -616,7 +624,8 @@ def health():
         "service": "SRS AI Analyzer",
         "provider": "JarvisClaw",
         "model": LLM_MODEL,
-        "internal_auth_configured": bool(SRS_API_KEY)
+        "internal_auth_configured": bool(SRS_API_KEY),
+        "provider_api_key_configured": bool(JARVISCLAW_API_KEY)
     }
 
 

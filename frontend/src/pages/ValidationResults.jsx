@@ -69,6 +69,7 @@ function ValidationResults() {
   const [llmLoading, setLlmLoading] = useState(false);
   const [error, setError] = useState("");
   const [llmError, setLlmError] = useState("");
+  const [llmFallbackNotice, setLlmFallbackNotice] = useState("");
   const [localModelLoading, setLocalModelLoading] = useState(false);
   const [localModelProgress, setLocalModelProgress] = useState("");
   const [localModelError, setLocalModelError] = useState("");
@@ -196,6 +197,7 @@ function ValidationResults() {
 
     setLlmLoading(true);
     setLlmError("");
+    setLlmFallbackNotice("");
 
     try {
       const response = await fetch(
@@ -233,11 +235,53 @@ function ValidationResults() {
     } catch (err) {
       console.error("AI analysis error:", err);
 
-      setLlmError(
-        err.message === "Failed to fetch"
-          ? "Cannot connect to the AI analysis service."
-          : err.message || "AI analysis could not be completed."
-      );
+      // Keep the results page useful when the hosted FastAPI service is sleeping
+      // or temporarily unavailable. Reuse only analysis already saved by the backend.
+      const savedResults = requirements
+        .filter((item) => item.requirementText && item.aiAnalysis)
+        .map((item) => {
+          const saved = item.aiAnalysis || {};
+          const asText = (value) => typeof value === "string" ? value : "";
+          const asList = (value) => Array.isArray(value)
+            ? value.filter((entry) => typeof entry === "string")
+            : [];
+          return {
+            requirement_id: item.requirementId,
+            requirement: item.requirementText,
+            analysis: {
+              quality_score: Number.isInteger(saved.quality_score)
+                ? saved.quality_score
+                : Math.max(0, Math.min(100, Number(item.qualityScore) || 0)),
+              classification: asText(saved.classification) || asText(item.classification) || "Previously saved analysis",
+              clarity: asText(saved.clarity) || asText(item.clarity),
+              completeness: asText(saved.completeness) || asText(item.completeness),
+              testability: asText(saved.testability) || asText(item.testability),
+              suggested_rewrite: asText(saved.suggested_rewrite),
+              explanation: asText(saved.explanation) || "Showing the analysis previously saved for this requirement. The live analysis service could not be reached.",
+              ambiguities: asList(saved.ambiguities),
+              missing_information: asList(saved.missing_information),
+              issues: asList(saved.issues).length ? asList(saved.issues) : asList(item.issues),
+            },
+          };
+        });
+
+      if (savedResults.length > 0) {
+        setLlmAnalysis({
+          status: "saved-fallback",
+          total_requirements: savedResults.length,
+          results: savedResults,
+        });
+        setLlmFallbackNotice(
+          "Live cloud analysis is temporarily unavailable (HTTP 502/upstream error). Showing previously saved analysis instead. You can still run the free local Qwen review below."
+        );
+        setLlmError("");
+      } else {
+        setLlmError(
+          err.message === "Failed to fetch"
+            ? "Cannot connect to the backend AI service. Check the Render AI service and backend configuration."
+            : err.message || "Cloud AI analysis could not be completed. Try the free local LLM review below."
+        );
+      }
     } finally {
       setLlmLoading(false);
     }
@@ -898,6 +942,11 @@ function ValidationResults() {
             </div>
           )}
 
+          {llmFallbackNotice && (
+            <div className="vr-ai-explanation" role="status">
+              {llmFallbackNotice}
+            </div>
+          )}
           {llmError && (
             <div className="vr-error-banner" role="alert">
               <AlertTriangle size={18} />

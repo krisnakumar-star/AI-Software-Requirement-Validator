@@ -19,16 +19,20 @@ load_dotenv()
 
 app = FastAPI(
     title="AI Software Requirement Validator",
-    description="Offline rule-based SRS requirement analysis",
+    description="AI-powered SRS analysis using JarvisClaw",
     version="6.0.0"
 )
 
 # ==================================================
-# LOCAL ANALYSIS CONFIGURATION
+# JARVISCLAW CONFIGURATION
 # ==================================================
 
+LLM_BASE_URL = "https://api.jarvisclaw.ai/v1/chat/completions"
+LLM_MODEL = os.getenv("LLM_MODEL", "auto")
 SRS_API_KEY = os.getenv("SRS_API_KEY")
-ANALYSIS_ENGINE = "offline-rule-engine"
+JARVISCLAW_API_KEY = os.getenv("JARVISCLAW_API_KEY")
+LLM_TIMEOUT = 90.0
+logger = logging.getLogger("requirement-validator.jarvisclaw")
 
 
 # ==================================================
@@ -289,7 +293,7 @@ async def call_llm(
 ) -> dict:
 
     payload = {
-        "model": "local-rule-engine",
+        "model": LLM_MODEL,
         "messages": [
             {
                 "role": "system",
@@ -303,10 +307,10 @@ async def call_llm(
         "max_tokens": 2500
     }
 
-    if not GROQ_API_KEY:
+    if not JARVISCLAW_API_KEY:
         raise HTTPException(
             status_code=503,
-            detail="Groq provider API key is not configured. Set GROQ_API_KEY on the AI service."
+            detail="JarvisClaw provider API key is not configured. Set JARVISCLAW_API_KEY on the AI service."
         )
 
     try:
@@ -320,40 +324,40 @@ async def call_llm(
                 json=payload,
                 headers={
                     "Content-Type": "application/json",
-                    "Authorization": f"Bearer {GROQ_API_KEY}"
+                    "Authorization": f"Bearer {JARVISCLAW_API_KEY}"
                 }
             )
 
-            logger.info("Groq returned HTTP %s", response.status_code)
+            logger.info("JarvisClaw returned HTTP %s", response.status_code)
 
             if response.status_code != 200:
                 upstream_detail = safe_upstream_error(response)
                 logger.error(
-                    "Groq request failed (HTTP %s): %s",
+                    "JarvisClaw request failed (HTTP %s): %s",
                     response.status_code,
                     upstream_detail,
                 )
 
                 if response.status_code == 401:
-                    category = "Groq rejected the request"
+                    category = "JarvisClaw rejected the request"
 
                 elif response.status_code == 403:
-                    category = "Groq denied access"
+                    category = "JarvisClaw denied access"
 
                 elif response.status_code == 404:
-                    category = "Groq endpoint or model not found"
+                    category = "JarvisClaw endpoint or model not found"
 
                 elif response.status_code == 429:
-                    category = "Groq rate limit reached"
+                    category = "JarvisClaw rate limit reached"
 
                 elif response.status_code == 402:
-                    category = "Groq requires payment or credits"
+                    category = "JarvisClaw requires payment or credits"
 
                 elif response.status_code >= 500:
-                    category = "Groq is temporarily unavailable"
+                    category = "JarvisClaw is temporarily unavailable"
 
                 else:
-                    category = f"Groq returned HTTP {response.status_code}"
+                    category = f"JarvisClaw returned HTTP {response.status_code}"
 
                 raise HTTPException(
                     status_code=502,
@@ -366,7 +370,7 @@ async def call_llm(
             except ValueError:
                 raise HTTPException(
                     status_code=502,
-                    detail="Groq returned invalid response JSON"
+                    detail="JarvisClaw returned invalid response JSON"
                 )
 
         choices = data.get("choices", [])
@@ -374,7 +378,7 @@ async def call_llm(
         if not choices:
             raise HTTPException(
                 status_code=502,
-                detail="Groq returned no response choices"
+                detail="JarvisClaw returned no response choices"
             )
 
         content = (
@@ -386,13 +390,13 @@ async def call_llm(
         if not isinstance(content, str) or not content.strip():
             raise HTTPException(
                 status_code=502,
-                detail="Groq returned empty AI content"
+                detail="JarvisClaw returned empty AI content"
             )
 
         try:
             result = parse_json_response(content)
 
-            print("Groq response parsed successfully")
+            print("JarvisClaw response parsed successfully")
 
             return result
 
@@ -411,7 +415,7 @@ async def call_llm(
 
     except httpx.TimeoutException:
 
-        print("Groq request timed out")
+        print("JarvisClaw request timed out")
 
         raise HTTPException(
             status_code=504,
@@ -421,13 +425,13 @@ async def call_llm(
     except httpx.RequestError as exc:
 
         print(
-            "Groq connection error:",
+            "JarvisClaw connection error:",
             type(exc).__name__
         )
 
         raise HTTPException(
             status_code=502,
-            detail="Could not connect to Groq"
+            detail="Could not connect to JarvisClaw"
         )
 
     except Exception as exc:
@@ -564,161 +568,32 @@ def validate_analysis(result: dict) -> dict:
 # ANALYZE ONE REQUIREMENT
 # ==================================================
 
-def analyze_requirement_locally(
-    requirement: str,
-    source: str | None = None,
-    section_number: str | None = None
-) -> dict:
-    """
-    Deterministic, offline SRS analysis.
-    This engine does not call an external LLM or require provider credentials.
-    Findings are heuristic and should be reviewed by a requirements engineer.
-    """
-    text = requirement.strip()
-    lower = text.lower()
-    words = re.findall(r"\b[\w'-]+\b", text)
-    word_count = len(words)
-
-    ambiguities = []
-    missing_information = []
-    issues = []
-
-    vague_terms = [
-        "fast", "quickly", "user-friendly", "easy", "efficient",
-        "adequate", "appropriate", "robust", "seamless", "soon",
-        "as soon as possible", "etc", "and so on", "normally",
-        "usually", "sufficient", "minimal", "maximum"
-    ]
-    for term in vague_terms:
-        if re.search(r"\b" + re.escape(term) + r"\b", lower):
-            ambiguities.append(
-                f'The term "{term}" is subjective or insufficiently quantified.'
-            )
-
-    actors = ["system", "application", "user", "administrator", "customer",
-              "service", "platform", "operator", "client"]
-    has_actor = any(re.search(r"\b" + re.escape(actor) + r"\b", lower) for actor in actors)
-    if not has_actor:
-        missing_information.append("Identify the actor or system component responsible for the behavior.")
-
-    modal_pattern = r"\b(shall|must|will|required to|should)\b"
-    has_obligation = bool(re.search(modal_pattern, lower))
-    if not has_obligation:
-        issues.append("The requirement does not use a clear obligation statement such as 'shall' or 'must'.")
-
-    measurable_patterns = [
-        r"\b\d+(?:\.\d+)?\s*(?:ms|milliseconds?|seconds?|minutes?|hours?|days?|weeks?|mb|gb|%|percent)\b",
-        r"\b(?:at least|at most|no more than|within|between|less than|greater than)\b",
-        r"\b\d+\s*(?:records?|users?|requests?|transactions?|attempts?)\b"
-    ]
-    measurable = any(re.search(pattern, lower) for pattern in measurable_patterns)
-    if not measurable:
-        ambiguities.append("No measurable threshold, limit, or acceptance criterion is stated.")
-
-    if word_count < 8:
-        missing_information.append("Provide more detail about the expected behavior and acceptance conditions.")
-    if word_count > 120:
-        issues.append("The requirement is lengthy; consider splitting it into smaller, independently testable requirements.")
-
-    if re.search(r"\b(and|or)\b", lower) and word_count > 20:
-        issues.append("The statement may combine multiple behaviors. Check whether it should be split into atomic requirements.")
-
-    if re.search(r"\b(may|might|could|possibly)\b", lower):
-        ambiguities.append("The wording expresses possibility rather than a mandatory, verifiable behavior.")
-
-    if not re.search(r"\b(when|if|after|before|upon|once|during|while)\b", lower):
-        missing_information.append("Consider specifying the trigger or conditions under which the requirement applies.")
-
-    nonfunctional_terms = [
-        "performance", "availability", "reliability", "security", "scalability",
-        "usability", "maintainability", "response time", "throughput",
-        "encryption", "accessibility", "backup", "recovery"
-    ]
-    constraint_terms = [
-        "must use", "shall use", "compatible with", "compliance",
-        "regulation", "standard", "constraint", "technology stack"
-    ]
-    if any(term in lower for term in constraint_terms):
-        classification = "Constraint"
-    elif any(term in lower for term in nonfunctional_terms):
-        classification = "Non-Functional"
-    else:
-        classification = "Functional"
-
-    if has_actor and has_obligation and word_count >= 8:
-        clarity = "Good" if not ambiguities else "Moderate"
-    elif word_count >= 8:
-        clarity = "Moderate"
-    else:
-        clarity = "Poor"
-
-    completeness = "Complete" if not missing_information and not ambiguities else (
-        "Partial" if word_count >= 8 else "Incomplete"
-    )
-
-    testability = "Testable" if measurable and has_obligation else (
-        "Partially Testable" if has_obligation or measurable else "Not Testable"
-    )
-
-    score = 100
-    score -= min(25, len(ambiguities) * 8)
-    score -= min(25, len(missing_information) * 8)
-    score -= min(20, len(issues) * 7)
-    if not has_actor:
-        score -= 8
-    if not has_obligation:
-        score -= 10
-    if word_count < 8:
-        score -= 10
-    score = max(0, min(100, score))
-
-    if not has_obligation:
-        suggested_rewrite = f"The system shall {text[0].lower() + text[1:] if text else text}"
-        if suggested_rewrite.endswith("."):
-            suggested_rewrite = suggested_rewrite[:-1]
-        suggested_rewrite += ". Define measurable acceptance criteria for this behavior."
-    else:
-        suggested_rewrite = text
-        if not measurable:
-            suggested_rewrite += " Specify a measurable acceptance criterion or threshold."
-
-    explanation_parts = [
-        f"The local SRS analyzer evaluated {word_count} words using requirement-quality rules.",
-        f"Detected classification: {classification}.",
-        f"Testability assessment: {testability}."
-    ]
-    if ambiguities:
-        explanation_parts.append(f"Found {len(ambiguities)} ambiguity indicator(s).")
-    if missing_information:
-        explanation_parts.append(f"Identified {len(missing_information)} potentially missing detail(s).")
-    explanation_parts.append(
-        "This is an offline heuristic assessment, not a generative LLM judgment; validate findings with a human reviewer."
-    )
-
-    return {
-        "quality_score": score,
-        "classification": classification,
-        "clarity": clarity,
-        "completeness": completeness,
-        "testability": testability,
-        "ambiguities": ambiguities,
-        "missing_information": missing_information,
-        "issues": issues,
-        "suggested_rewrite": suggested_rewrite,
-        "explanation": " ".join(explanation_parts)
-    }
-
-
 async def analyze_requirement(
     requirement: str,
     source: str | None = None,
     section_number: str | None = None
 ) -> dict:
-    result = analyze_requirement_locally(
-        requirement,
-        source,
-        section_number
+
+    user_prompt = f"""
+Analyze the following software requirement.
+
+Requirement:
+{requirement}
+
+Source:
+{source or "Not provided"}
+
+Section:
+{section_number or "Not provided"}
+
+Return one complete analysis using the required JSON structure.
+"""
+
+    result = await call_llm(
+        SYSTEM_PROMPT,
+        user_prompt
     )
+
     return validate_analysis(result)
 
 
@@ -732,8 +607,8 @@ def home():
     return {
         "message": "AI Requirement Validator is running",
         "version": "6.0.0",
-        "provider": "Local SRS Rule Engine",
-        "model": ANALYSIS_ENGINE
+        "provider": "JarvisClaw",
+        "model": LLM_MODEL
     }
 
 
@@ -747,11 +622,10 @@ def health():
     return {
         "status": "ok",
         "service": "SRS AI Analyzer",
-        "provider": "Local SRS Rule Engine",
-        "model": ANALYSIS_ENGINE,
+        "provider": "JarvisClaw",
+        "model": LLM_MODEL,
         "internal_auth_configured": bool(SRS_API_KEY),
-        "external_provider_required": False,
-        "analysis_mode": "offline_rules"
+        "provider_api_key_configured": bool(JARVISCLAW_API_KEY)
     }
 
 
@@ -791,7 +665,7 @@ async def analyze(
 
     return {
         "status": "success",
-        "provider": "Groq",
+        "provider": "JarvisClaw",
         "model": LLM_MODEL,
         "requirement": requirement,
         "analysis": result
@@ -860,7 +734,7 @@ async def analyze_batch(
 
     return {
         "status": "success",
-        "provider": "Groq",
+        "provider": "JarvisClaw",
         "model": LLM_MODEL,
         "total_requirements": len(requirements),
         "analyses": analyses

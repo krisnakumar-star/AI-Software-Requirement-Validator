@@ -76,7 +76,7 @@ Install the following before running the application:
 ### 1. Clone the repository
 
 ```bash
-git clone https://github.com/Rakshali-p09/AI-Software-Requirement-Validator.git
+git clone https://github.com/krisnakumar-star/AI-Software-Requirement-Validator.git
 cd AI-Software-Requirement-Validator
 ```
 
@@ -165,9 +165,9 @@ The backend uses `mongodb://localhost:27017/requirement_validator` by default. S
 
 ## Author
 
-**Rakshali Patidar**
+**Krishna Kumar V**
 
-GitHub: [Rakshali-p09](https://github.com/Rakshali-p09)
+GitHub: [Rakshali-p09](https://github.com/krisnakumar-star)
 
 ## License
 

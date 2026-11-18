@@ -10,6 +10,7 @@ The FastAPI service provides:
 - Attribute-specific checks for performance, security, availability, reliability, usability, compatibility, maintainability, privacy, integrations, data rules and standards compliance.
 - Detection of vague wording, missing actors/actions, unclear references, open-ended scope, compound requirements, missing triggers/outcomes, weak measurable targets and missing exception paths.
 - Severity-coded findings with recommendations, explanations, and cautious rewrite guidance that does not invent stakeholder thresholds.
+- An expert-style review report with an executive summary, risk verdict, strengths, dimension-by-dimension assessment, detailed reasoning, stakeholder clarification questions, draft acceptance criteria, illustrative positive/negative/regression test scenarios, and a prioritized improvement plan.
 - Batch-level category summaries, average score, possible duplicate detection and possible cross-requirement conflicts.
 - Existing single-analysis response fields are preserved; detailed findings are exposed separately for richer clients.
 

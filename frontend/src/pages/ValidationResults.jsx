@@ -102,6 +102,7 @@ function ValidationResults() {
   const [error, setError] = useState("");
   const [llmError, setLlmError] = useState("");
   const [llmFallbackNotice, setLlmFallbackNotice] = useState("");
+  const [showAiAnalysis, setShowAiAnalysis] = useState(false);
   const [projectInfo, setProjectInfo] = useState(null);
   const autoAnalysisStarted = useRef(false);
 
@@ -856,18 +857,43 @@ function ValidationResults() {
           </div>
         </details>
 
-        <ResultsWorkspace
-          projectName={projectInfo?.name}
-          items={llmResults}
-          report={llmAnalysis?.document_report || projectInfo?.analysisReport || null}
-          engineState={{ loading: llmLoading, error: llmError || llmFallbackNotice }}
-          onRerun={runLlmAnalysis}
-          offlineAnswer={(question) => buildOfflineSrsAnswer(question, llmResults.length ? llmResults : requirements.map((item) => ({
-            requirement_id: item.requirementId,
-            requirement: item.requirementText || "",
-            analysis: { quality_score: item.qualityScore, issues: item.issues || [], suggested_rewrite: "" },
-          })), { totalRequirements, score, scoreStatus, goodRequirements, needsImprovement, poorRequirements, duplicateRequirements, inconsistentRequirements })}
-        />
+        <section className="vr-section vr-ai-entry">
+          <div className="vr-section-heading">
+            <div>
+              <span className="vr-eyebrow">DETAILED SRS REVIEW</span>
+              <h2>AI Analysis</h2>
+              <p>Open the complete analysis workspace to explore the report, requirement-level findings, quality assessment, cross-requirement checks, recommendations, offline guide and on-device Qwen tools.</p>
+            </div>
+            <button
+              type="button"
+              className="vr-primary-button"
+              onClick={() => setShowAiAnalysis((open) => !open)}
+              aria-expanded={showAiAnalysis}
+              aria-controls="ai-analysis-workspace"
+            >
+              <Sparkles size={16} />
+              {showAiAnalysis ? "Hide AI Analysis" : "Open AI Analysis"}
+              <ArrowRight size={16} />
+            </button>
+          </div>
+        </section>
+
+        {showAiAnalysis && (
+          <div id="ai-analysis-workspace">
+            <ResultsWorkspace
+              projectName={projectInfo?.name}
+              items={llmResults}
+              report={llmAnalysis?.document_report || projectInfo?.analysisReport || null}
+              engineState={{ loading: llmLoading, error: llmError || llmFallbackNotice }}
+              onRerun={runLlmAnalysis}
+              offlineAnswer={(question) => buildOfflineSrsAnswer(question, llmResults.length ? llmResults : requirements.map((item) => ({
+                requirement_id: item.requirementId,
+                requirement: item.requirementText || "",
+                analysis: { quality_score: item.qualityScore, issues: item.issues || [], suggested_rewrite: "" },
+              })), { totalRequirements, score, scoreStatus, goodRequirements, needsImprovement, poorRequirements, duplicateRequirements, inconsistentRequirements })}
+            />
+          </div>
+        )}
 
         {/* Footer actions */}
         <div className="vr-bottom-actions">

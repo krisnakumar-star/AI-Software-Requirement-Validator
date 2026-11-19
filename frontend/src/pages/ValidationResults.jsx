@@ -107,7 +107,6 @@ function ValidationResults() {
   const [localModelError, setLocalModelError] = useState("");
   const [localModelReport, setLocalModelReport] = useState("");
   const [expandedInsightIds, setExpandedInsightIds] = useState({});
-  const [reviewAction, setReviewAction] = useState("");
   const [chatInput, setChatInput] = useState("");
   const [chatMessages, setChatMessages] = useState([]);
   const [chatLoading, setChatLoading] = useState(false);

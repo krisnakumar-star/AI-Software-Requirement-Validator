@@ -755,6 +755,9 @@ function ValidationResults() {
           </div>
         </section>
 
+        <details className="vr-disclosure vr-section">
+          <summary><span><small>OPTIONAL DETAIL</small><strong>Quality attribute breakdown</strong><em>Clarity, completeness, consistency and testability indicators</em></span><span className="vr-disclosure-count">View details</span></summary>
+          <div className="vr-disclosure-body">
         {/* Quality metrics */}
         <section className="vr-section">
           <div className="vr-section-heading">
@@ -807,6 +810,9 @@ function ValidationResults() {
             })}
           </div>
         </section>
+
+          </div>
+        </details>
 
         {/* Detected issues */}
         <section className="vr-section">
@@ -910,6 +916,9 @@ function ValidationResults() {
           )}
         </section>
 
+        <details className="vr-disclosure vr-section">
+          <summary><span><small>VALIDATION DETAILS</small><strong>More analysis statistics</strong><em>Duplicates, inconsistencies and requirement status counts</em></span><span className="vr-disclosure-count">View details</span></summary>
+          <div className="vr-disclosure-body">
         {/* Detailed counts */}
         <section className="vr-section">
           <div className="vr-section-heading">
@@ -938,6 +947,12 @@ function ValidationResults() {
           </div>
         </section>
 
+          </div>
+        </details>
+
+        <details className="vr-disclosure vr-section vr-ai-disclosure">
+          <summary><span><small>OPTIONAL ADVANCED REVIEW</small><strong>AI analysis & local model</strong><em>Open detailed findings or run the downloadable Qwen model</em></span><span className="vr-disclosure-count">Open AI tools</span></summary>
+          <div className="vr-disclosure-body">
         {/* Optional AI analysis */}
         <section className="vr-section vr-ai-section">
           <div className="vr-section-heading">
@@ -1178,11 +1193,14 @@ function ValidationResults() {
           )}
         </section>
 
+          </div>
+        </details>
+
         {/* Instant offline assistant: deterministic answers, no model/API */}
-        <section className="vr-section vr-quick-review">
-          <div className="vr-section-heading"><div><span className="vr-eyebrow">OFFLINE PROJECT GUIDE</span><h2>Ask about your SRS</h2><p>Instant answers about this validation report. This guide runs in the browser without an AI model or external API.</p></div><span className="vr-ai-heading-icon"><ShieldCheck size={24} /></span></div>
+        <section className="vr-section vr-quick-review vr-assistant-section">
+          <div className="vr-section-heading"><div><span className="vr-eyebrow">OFFLINE PROJECT GUIDE</span><h2>Ask about your SRS</h2><p>Get quick explanations and practical next steps. Works instantly without a model or API.</p></div><span className="vr-ai-heading-icon"><ShieldCheck size={24} /></span></div>
           <div className="vr-quick-review-buttons" style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginBottom: "16px" }}>
-            {["Summarize my SRS", "Explain my quality score", "What should I fix first?", "What information is missing?", "How do I write acceptance criteria?", "Explain functional and non-functional requirements"].map((prompt) => <button key={prompt} type="button" className="vr-secondary-button" disabled={chatLoading} onClick={() => sendChatMessage(prompt)}>{prompt}</button>)}
+            {["Summarize my SRS", "What should I fix first?", "What information is missing?", "How do I write acceptance criteria?"].map((prompt) => <button key={prompt} type="button" className="vr-secondary-button" disabled={chatLoading} onClick={() => sendChatMessage(prompt)}>{prompt}</button>)}
           </div>
           <div className="vr-issue-card vr-chat-panel"><div className="vr-ai-overall"><span>INSTANT OFFLINE HELP</span><strong>No model · No API · No waiting</strong></div>
             <div className="vr-chat-messages" aria-live="polite" style={{ display: "flex", flexDirection: "column", gap: "12px", maxHeight: "440px", overflowY: "auto", padding: "12px 0" }}>

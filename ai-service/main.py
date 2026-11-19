@@ -10,12 +10,15 @@ import secrets
 from typing import Any
 
 from dotenv import load_dotenv
+
+# Load local configuration before importing the engine: its optional semantic
+# backend reads SRS_SEMANTIC_MODEL when the module is initialized.
+load_dotenv()
+
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field, model_validator
 
 from srs_engine import ENGINE_VERSION, analyze_batch as engine_batch, analyze_single, engine_status
-
-load_dotenv()
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("srs-analyzer")
 

@@ -14,7 +14,7 @@ load_dotenv()
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO"))
 logger = logging.getLogger("srs-analyzer")
 
-VERSION = "9.0.0"
+VERSION = "9.1.0"
 SRS_API_KEY = os.getenv("SRS_API_KEY")
 app = FastAPI(
     title="SRS Requirement Analyzer",
@@ -480,7 +480,7 @@ def cross_requirement_checks(requirements: list[str], analyses: list[dict]) -> l
 
 @app.get("/")
 def home():
-    return {"message": "SRS Requirement Analyzer is running", "version": VERSION, "provider": "built-in NLP analysis engine", "mode": "model-free"}
+    return {"message": "SRS Requirement Analyzer is running", "version": VERSION, "provider": "built-in NLP analysis engine", "mode": "model-free", "external_provider_required": False}
 
 @app.get("/health")
 def health():

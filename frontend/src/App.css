@@ -10174,3 +10174,93 @@ a {
   font-size: 12px;
   line-height: 1.5;
 }
+
+
+/* ---------- Results page: concise, scan-friendly disclosures ---------- */
+.vr-disclosure {
+  overflow: hidden;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  border-radius: 16px;
+  background: rgba(15, 22, 39, 0.58);
+}
+.vr-disclosure > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 21px;
+  cursor: pointer;
+  list-style: none;
+}
+.vr-disclosure > summary::-webkit-details-marker { display: none; }
+.vr-disclosure > summary::after {
+  content: "+";
+  color: #5eead4;
+  font-size: 22px;
+  font-weight: 500;
+}
+.vr-disclosure[open] > summary::after { content: "−"; }
+.vr-disclosure > summary > span:first-child {
+  display: grid;
+  gap: 4px;
+}
+.vr-disclosure > summary small {
+  color: #5eead4;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 1.4px;
+}
+.vr-disclosure > summary strong {
+  color: #eaf0f8;
+  font-size: 14px;
+  font-weight: 750;
+}
+.vr-disclosure > summary em {
+  color: #8fa0b8;
+  font-size: 11px;
+  font-style: normal;
+  line-height: 1.5;
+}
+.vr-disclosure-count {
+  margin-left: auto;
+  padding: 7px 10px;
+  color: #a5b4ca;
+  border: 1px solid rgba(148,163,184,.14);
+  border-radius: 8px;
+  font-size: 10px;
+  white-space: nowrap;
+}
+.vr-disclosure-body {
+  padding: 0 20px 20px;
+  border-top: 1px solid rgba(148,163,184,.1);
+}
+.vr-disclosure-body > .vr-section-heading { margin-top: 20px; }
+.vr-disclosure-body > .vr-metrics-grid,
+.vr-disclosure-body > .vr-statistics-grid { margin-top: 16px; }
+.vr-ai-disclosure { border-color: rgba(167,139,250,.2); }
+.vr-assistant-section {
+  padding: 22px;
+  border: 1px solid rgba(45,212,191,.18);
+  border-radius: 18px;
+  background: linear-gradient(135deg, rgba(17,39,47,.5), rgba(15,22,39,.88));
+}
+.vr-assistant-section .vr-section-heading { margin-bottom: 14px; }
+.vr-assistant-section .vr-section-heading h2 { margin-top: 5px; }
+.vr-assistant-section .vr-quick-review-buttons { gap: 8px !important; }
+.vr-assistant-section .vr-secondary-button {
+  min-height: 36px;
+  padding: 0 11px;
+  font-size: 10px;
+}
+.vr-assistant-section .vr-chat-panel {
+  padding: 17px;
+  background: rgba(8,13,27,.45);
+}
+.vr-assistant-section .vr-chat-messages { max-height: 300px !important; }
+@media (max-width: 640px) {
+  .vr-disclosure > summary { padding: 15px; gap: 10px; }
+  .vr-disclosure-count { display: none; }
+  .vr-disclosure-body { padding: 0 12px 14px; }
+  .vr-assistant-section { padding: 15px; }
+  .vr-assistant-section .vr-chat-panel { padding: 12px; }
+}

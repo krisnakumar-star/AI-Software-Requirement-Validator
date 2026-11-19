@@ -74,6 +74,7 @@ function ValidationResults() {
   const [localModelProgress, setLocalModelProgress] = useState("");
   const [localModelError, setLocalModelError] = useState("");
   const [localModelReport, setLocalModelReport] = useState("");
+  const [expandedInsightIds, setExpandedInsightIds] = useState({});
 
   useEffect(() => {
     let cancelled = false;
@@ -1015,31 +1016,58 @@ function ValidationResults() {
                         </div>
 
                         <div className="vr-ai-overall">
-                          <span>Quality score</span>
+                          <span>Quick insight</span>
                           <strong>{analysis.quality_score}/100 · {analysis.classification}</strong>
                         </div>
                         <div className="vr-issue-metadata">
                           <span>Clarity: {analysis.clarity || "—"}</span>
                           <span>Completeness: {analysis.completeness || "—"}</span>
                           <span>Testability: {analysis.testability || "—"}</span>
-                          <span>Feasibility: {analysis.feasibility || "—"}</span>
-                          <span>Consistency: {analysis.consistency || "—"}</span>
                         </div>
-                        {analysis.explanation && <p className="vr-ai-explanation">{analysis.explanation}</p>}
-                        {[
-                          ["Ambiguities", analysis.ambiguities],
-                          ["Missing information", analysis.missing_information],
-                          ["Issues", analysis.issues],
-                        ].map(([title, items]) => Array.isArray(items) && items.length > 0 && (
-                          <div className="vr-detail-block" key={title}>
-                            <h4><AlertTriangle size={16} />{title}</h4>
-                            <ul>{items.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul>
-                          </div>
-                        ))}
-                        {analysis.suggested_rewrite && (
-                          <div className="vr-suggestion-block">
-                            <h4><Lightbulb size={16} />Suggested rewrite</h4>
-                            <p>{analysis.suggested_rewrite}</p>
+                        <p className="vr-ai-explanation">
+                          {analysis.explanation
+                            ? `${analysis.explanation.slice(0, 220)}${analysis.explanation.length > 220 ? "…" : ""}`
+                            : "Review the detailed findings for more information."}
+                        </p>
+                        <button
+                          type="button"
+                          className="vr-secondary-button"
+                          onClick={() => setExpandedInsightIds((current) => ({
+                            ...current,
+                            [result.requirement_id ?? index]: !current[result.requirement_id ?? index],
+                          }))}
+                          aria-expanded={Boolean(expandedInsightIds[result.requirement_id ?? index])}
+                        >
+                          {expandedInsightIds[result.requirement_id ?? index]
+                            ? "Hide full insights"
+                            : "View full insights"}
+                        </button>
+
+                        {expandedInsightIds[result.requirement_id ?? index] && (
+                          <div className="vr-ai-full-insights">
+                            <div className="vr-issue-metadata">
+                              <span>Feasibility: {analysis.feasibility || "—"}</span>
+                              <span>Consistency: {analysis.consistency || "—"}</span>
+                            </div>
+                            {analysis.explanation && (
+                              <p className="vr-ai-explanation">{analysis.explanation}</p>
+                            )}
+                            {[
+                              ["Ambiguities", analysis.ambiguities],
+                              ["Missing information", analysis.missing_information],
+                              ["Issues", analysis.issues],
+                            ].map(([title, items]) => Array.isArray(items) && items.length > 0 && (
+                              <div className="vr-detail-block" key={title}>
+                                <h4><AlertTriangle size={16} />{title}</h4>
+                                <ul>{items.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul>
+                              </div>
+                            ))}
+                            {analysis.suggested_rewrite && (
+                              <div className="vr-suggestion-block">
+                                <h4><Lightbulb size={16} />Suggested rewrite</h4>
+                                <p>{analysis.suggested_rewrite}</p>
+                              </div>
+                            )}
                           </div>
                         )}
                       </article>

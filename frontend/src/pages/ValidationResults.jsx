@@ -76,6 +76,10 @@ function ValidationResults() {
   const [localModelReport, setLocalModelReport] = useState("");
   const [expandedInsightIds, setExpandedInsightIds] = useState({});
   const [reviewAction, setReviewAction] = useState("");
+  const [chatInput, setChatInput] = useState("");
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatError, setChatError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -329,6 +333,40 @@ function ValidationResults() {
       setLocalModelProgress("");
     } finally {
       setLocalModelLoading(false);
+    }
+  };
+
+
+  const sendChatMessage = async (promptText = chatInput) => {
+    const question = String(promptText || "").trim();
+    if (!question || chatLoading) return;
+    const userMessage = { role: "user", content: question };
+    const nextHistory = [...chatMessages, userMessage];
+    setChatMessages(nextHistory);
+    setChatInput("");
+    setChatLoading(true);
+    setChatError("");
+    try {
+      const { generateSrsChatReply } = await import("../services/localSrsModel.js");
+      const items = llmResults.length > 0 ? llmResults : requirements.map((item) => ({
+        requirement: item.requirementText || "",
+        analysis: {
+          quality_score: item.qualityScore,
+          classification: item.classification,
+          issues: item.issues || [],
+          suggestions: item.suggestions || [],
+        },
+      })).filter((item) => item.requirement.trim());
+      if (!items.length) throw new Error("No project requirements are available to discuss.");
+      const reply = await generateSrsChatReply(items, chatMessages, question, setLocalModelProgress);
+      setChatMessages((current) => [...current, { role: "assistant", content: reply }]);
+    } catch (err) {
+      setChatMessages((current) => current.filter((message, index) => !(index === current.length - 1 && message === userMessage)));
+      setChatInput(question);
+      setChatError(err.message || "The local assistant could not answer. Please try again.");
+    } finally {
+      setChatLoading(false);
+      setLocalModelProgress("");
     }
   };
 
@@ -1103,31 +1141,51 @@ function ValidationResults() {
           )}
         </section>
 
-        {/* Quick review actions: fixed prompts, not a chatbot */}
+        {/* Contextual project assistant powered by the local open-weight model */}
         <section className="vr-section vr-quick-review">
           <div className="vr-section-heading">
             <div>
-              <span className="vr-eyebrow">QUICK REVIEW</span>
-              <h2>Explore your report</h2>
-              <p>Choose a topic to get a focused explanation from your validation results.</p>
+              <span className="vr-eyebrow">PROJECT ASSISTANT</span>
+              <h2>Ask about your SRS</h2>
+              <p>Ask questions about your requirements, validation scores, detected issues, or how to improve the SRS. Answers are generated locally in your browser.</p>
             </div>
+            <span className="vr-ai-heading-icon"><BrainCircuit size={24} /></span>
           </div>
-          <div className="vr-bottom-actions vr-quick-review-buttons">
-            <button type="button" className="vr-secondary-button" onClick={() => setReviewAction("summary")}><FileText size={16} /> Summarize report</button>
-            <button type="button" className="vr-secondary-button" onClick={() => setReviewAction("basic")}><Lightbulb size={16} /> Basic questions</button>
-            <button type="button" className="vr-secondary-button" onClick={() => setReviewAction("important")}><Target size={16} /> Important questions</button>
+          <div className="vr-quick-review-buttons" style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginBottom: "16px" }}>
+            {[
+              "Summarize my SRS",
+              "What are the most important issues?",
+              "How can I improve the poor requirements?",
+              "Give me basic questions about this project",
+              "What should I fix first?",
+            ].map((prompt) => (
+              <button key={prompt} type="button" className="vr-secondary-button" disabled={chatLoading} onClick={() => sendChatMessage(prompt)}>{prompt}</button>
+            ))}
           </div>
-          {reviewAction === "summary" && <article className="vr-issue-card vr-quick-review-answer"><h3><Sparkles size={17} /> Report summary</h3><p>{quickReviewSummary}</p></article>}
-          {(reviewAction === "basic" || reviewAction === "important") && (
-            <article className="vr-issue-card vr-quick-review-answer">
-              <h3>{reviewAction === "basic" ? "Basic questions" : "Important review questions"}</h3>
-              <div className="vr-quick-question-list">
-                {(reviewAction === "basic" ? basicReviewQuestions : importantReviewQuestions).map((item, index) => (
-                  <details className="vr-quick-question" key={item.question} open={index === 0}><summary>{item.question}</summary><p style={{ whiteSpace: "pre-wrap" }}>{item.answer}</p></details>
-                ))}
-              </div>
-            </article>
-          )}
+          <div className="vr-issue-card vr-chat-panel">
+            <div className="vr-ai-overall">
+              <span>LOCAL AI ASSISTANT</span>
+              <strong>Qwen2.5 0.5B Instruct · No paid API required</strong>
+            </div>
+            <div className="vr-chat-messages" aria-live="polite" style={{ display: "flex", flexDirection: "column", gap: "12px", maxHeight: "440px", overflowY: "auto", padding: "12px 0" }}>
+              {chatMessages.length === 0 && (
+                <p className="vr-ai-explanation">Hi! I can explain your validation report, summarize the SRS, identify high-priority fixes, suggest requirement improvements, and answer basic or important project questions. Choose a suggested question or type your own.</p>
+              )}
+              {chatMessages.map((message, index) => (
+                <div key={index} style={{ alignSelf: message.role === "user" ? "flex-end" : "stretch", maxWidth: message.role === "user" ? "85%" : "100%", padding: "12px 14px", borderRadius: "12px", background: message.role === "user" ? "var(--primary-color, #e9e7ff)" : "var(--card-background, rgba(127,127,127,0.08))", color: "inherit", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                  <strong style={{ display: "block", fontSize: "12px", marginBottom: "5px" }}>{message.role === "user" ? "You" : "ReqValidator assistant"}</strong>
+                  {message.content}
+                </div>
+              ))}
+              {chatLoading && <p className="vr-ai-explanation" role="status"><LoaderCircle size={15} className="vr-spinner" /> Preparing an answer on this device...</p>}
+            </div>
+            {chatError && <div className="vr-error-banner" role="alert"><AlertTriangle size={16} />{chatError}</div>}
+            <form onSubmit={(event) => { event.preventDefault(); sendChatMessage(); }} style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "12px" }}>
+              <input value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="Ask something about your SRS..." aria-label="Ask a question about your SRS" disabled={chatLoading} style={{ flex: 1, minWidth: 0 }} />
+              <button type="submit" className="vr-primary-button" disabled={chatLoading || !chatInput.trim()}>{chatLoading ? <LoaderCircle size={16} className="vr-spinner" /> : <ArrowRight size={16} />} Send</button>
+            </form>
+            <p className="vr-ai-explanation" style={{ fontSize: "12px" }}>The first message may take longer while the model downloads. Model speed depends on your device. Verify important recommendations before using them as final requirements.</p>
+          </div>
         </section>
 
         {/* Footer actions */}

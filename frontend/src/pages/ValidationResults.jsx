@@ -56,6 +56,38 @@ function isValidAnalysisResponse(data) {
   });
 }
 
+function buildOfflineSrsAnswer(question, items, metrics) {
+  const q = String(question || '').toLowerCase();
+  const records = Array.isArray(items) ? items : [];
+  const flagged = records.filter((item) => {
+    const a = item.analysis || {};
+    return (a.issues || []).length || (a.ambiguities || []).length || (a.missing_information || []).length || Number(a.quality_score) < 60;
+  });
+  const detailLines = (entries) => entries.slice(0, 6).map((item, index) => {
+    const a = item.analysis || {};
+    const id = item.requirement_id || `Requirement ${index + 1}`;
+    const notes = [...(a.issues || []), ...(a.ambiguities || []), ...(a.missing_information || [])].slice(0, 3);
+    return `• ${id}: ${notes.length ? notes.join('; ') : (a.explanation || 'Review clarity and testability.')}`;
+  }).join('\n');
+  if (/^(hi|hello|hey)[!. ]*$/.test(q)) return 'Hello! I am the offline ReqValidator guide. Ask me to explain your score, summarize findings, identify issues, improve a requirement, or write acceptance criteria.';
+  if (/summar|overview|brief|explain report/.test(q)) return `Validation summary\n• Requirements: ${metrics.totalRequirements}\n• Quality score: ${metrics.score}/100 (${metrics.scoreStatus})\n• Good: ${metrics.goodRequirements}\n• Needs improvement: ${metrics.needsImprovement}\n• Poor: ${metrics.poorRequirements}\n• Duplicates: ${metrics.duplicateRequirements}\n• Inconsistencies: ${metrics.inconsistentRequirements}\n\nStart with poor and needs-improvement requirements. Resolve unclear behavior, missing details, and add measurable acceptance criteria.`;
+  if (/score|rating|quality|percentage/.test(q)) return `Your quality score is ${metrics.score}/100 (${metrics.scoreStatus}). There are ${metrics.goodRequirements} good, ${metrics.needsImprovement} needing improvement, and ${metrics.poorRequirements} poor requirements. Treat this as a screening indicator and review individual findings before approval.`;
+  if (/duplicate|repeat/.test(q)) return `The validation summary reports ${metrics.duplicateRequirements} duplicate requirement(s). Compare requirements describing the same user goal or behavior. Merge only when they truly express the same rule; preserve distinct conditions.`;
+  if (/inconsisten|conflict|contradict/.test(q)) return `The validation summary reports ${metrics.inconsistentRequirements} inconsistent requirement(s). Check for conflicting rules, limits, roles, terminology, or system behavior. Confirm the intended rule with the product owner before editing.`;
+  if (/poor|risk|problem|issue|important|priority|fix first|attention/.test(q)) return `Requirements needing attention:\n${detailLines(flagged) || 'No detailed flagged requirements are available.'}\n\nRecommended order: clarify behavior, specify actors and inputs, define failure and boundary cases, then add testable acceptance criteria.`;
+  if (/missing|ambigu|unclear|vague|incomplete/.test(q)) {
+    const details = records.flatMap((item, index) => [...(item.analysis?.ambiguities || []), ...(item.analysis?.missing_information || [])].map((note) => `• ${item.requirement_id || `Requirement ${index + 1}`}: ${note}`));
+    return details.length ? `Potential gaps from the analysis:\n${details.slice(0, 10).join('\n')}\n\nConfirm unknown details with the product owner instead of guessing.` : 'Check that each requirement states its actor, trigger, inputs, expected outcome, constraints, permissions, and exception behavior.';
+  }
+  if (/test|acceptance|given|when|then|verif/.test(q)) return 'Use Given–When–Then acceptance criteria:\n• Given: the starting condition and relevant user/system state.\n• When: the action or event occurs.\n• Then: the observable expected result.\nAlso cover valid input, invalid input, boundary values, permissions, and failure behavior. Use only confirmed measurable values.';
+  if (/rewrite|improv|better|correct|requirement/.test(q)) {
+    const target = records.find((item) => item.analysis?.suggested_rewrite);
+    return target ? `Suggested rewrite for ${target.requirement_id || 'the requirement'}:\n${target.analysis.suggested_rewrite}\n\nConfirm all unknown details with the product owner.` : 'Paste the exact requirement text or include its ID. A good rewrite identifies the actor, action, conditions, expected outcome, and measurable acceptance criteria without inventing details.';
+  }
+  if (/functional|non.?functional|classification|type/.test(q)) return 'Functional requirements describe what the system must do. Non-functional requirements describe quality or constraints such as performance, security, usability, reliability, and availability. Both should be specific and verifiable.';
+  if (/actor|user|stakeholder|who use/.test(q)) return 'Identify each actor that interacts with the system: end users, administrators, external services, or other systems. Describe each actor’s goal, permitted actions, and access restrictions. Do not assume roles that are not stated.';
+  return 'I can help without loading a model. Try: “Summarize my SRS”, “Explain my score”, “What should I fix first?”, “What information is missing?”, or “How do I write acceptance criteria?”. For a specific rewrite, paste the requirement text.';
+}
 function ValidationResults() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -347,18 +379,23 @@ function ValidationResults() {
     setChatLoading(true);
     setChatError("");
     try {
-      const { generateSrsChatReply } = await import("../services/localSrsModel.js");
       const items = llmResults.length > 0 ? llmResults : requirements.map((item) => ({
+        requirement_id: item.requirementId,
         requirement: item.requirementText || "",
         analysis: {
           quality_score: item.qualityScore,
           classification: item.classification,
+          clarity: item.clarity,
+          completeness: item.completeness,
+          testability: item.testability,
           issues: item.issues || [],
           suggestions: item.suggestions || [],
         },
       })).filter((item) => item.requirement.trim());
-      if (!items.length) throw new Error("No project requirements are available to discuss.");
-      const reply = await generateSrsChatReply(items, chatMessages, question, setLocalModelProgress);
+      const reply = buildOfflineSrsAnswer(question, items, {
+        totalRequirements, score, scoreStatus, goodRequirements,
+        needsImprovement, poorRequirements, duplicateRequirements, inconsistentRequirements,
+      });
       setChatMessages((current) => [...current, { role: "assistant", content: reply }]);
     } catch (err) {
       setChatMessages((current) => current.filter((message, index) => !(index === current.length - 1 && message === userMessage)));
@@ -1141,53 +1178,26 @@ function ValidationResults() {
           )}
         </section>
 
-        {/* Contextual project assistant powered by the local open-weight model */}
+        {/* Instant offline assistant: deterministic answers, no model/API */}
         <section className="vr-section vr-quick-review">
-          <div className="vr-section-heading">
-            <div>
-              <span className="vr-eyebrow">PROJECT ASSISTANT</span>
-              <h2>Ask about your SRS</h2>
-              <p>Ask questions about your requirements, validation scores, detected issues, or how to improve the SRS. Answers are generated locally in your browser.</p>
-            </div>
-            <span className="vr-ai-heading-icon"><BrainCircuit size={24} /></span>
-          </div>
+          <div className="vr-section-heading"><div><span className="vr-eyebrow">OFFLINE PROJECT GUIDE</span><h2>Ask about your SRS</h2><p>Instant answers about this validation report. This guide runs in the browser without an AI model or external API.</p></div><span className="vr-ai-heading-icon"><ShieldCheck size={24} /></span></div>
           <div className="vr-quick-review-buttons" style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginBottom: "16px" }}>
-            {[
-              "Summarize my SRS",
-              "What are the most important issues?",
-              "How can I improve the poor requirements?",
-              "Give me basic questions about this project",
-              "What should I fix first?",
-            ].map((prompt) => (
-              <button key={prompt} type="button" className="vr-secondary-button" disabled={chatLoading} onClick={() => sendChatMessage(prompt)}>{prompt}</button>
-            ))}
+            {["Summarize my SRS", "Explain my quality score", "What should I fix first?", "What information is missing?", "How do I write acceptance criteria?", "Explain functional and non-functional requirements"].map((prompt) => <button key={prompt} type="button" className="vr-secondary-button" disabled={chatLoading} onClick={() => sendChatMessage(prompt)}>{prompt}</button>)}
           </div>
-          <div className="vr-issue-card vr-chat-panel">
-            <div className="vr-ai-overall">
-              <span>LOCAL AI ASSISTANT</span>
-              <strong>Qwen2.5 0.5B Instruct · No paid API required</strong>
-            </div>
+          <div className="vr-issue-card vr-chat-panel"><div className="vr-ai-overall"><span>INSTANT OFFLINE HELP</span><strong>No model · No API · No waiting</strong></div>
             <div className="vr-chat-messages" aria-live="polite" style={{ display: "flex", flexDirection: "column", gap: "12px", maxHeight: "440px", overflowY: "auto", padding: "12px 0" }}>
-              {chatMessages.length === 0 && (
-                <p className="vr-ai-explanation">Hi! I can explain your validation report, summarize the SRS, identify high-priority fixes, suggest requirement improvements, and answer basic or important project questions. Choose a suggested question or type your own.</p>
-              )}
-              {chatMessages.map((message, index) => (
-                <div key={index} style={{ alignSelf: message.role === "user" ? "flex-end" : "stretch", maxWidth: message.role === "user" ? "85%" : "100%", padding: "12px 14px", borderRadius: "12px", background: message.role === "user" ? "var(--primary-color, #e9e7ff)" : "var(--card-background, rgba(127,127,127,0.08))", color: "inherit", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
-                  <strong style={{ display: "block", fontSize: "12px", marginBottom: "5px" }}>{message.role === "user" ? "You" : "ReqValidator assistant"}</strong>
-                  {message.content}
-                </div>
-              ))}
-              {chatLoading && <p className="vr-ai-explanation" role="status"><LoaderCircle size={15} className="vr-spinner" /> Preparing an answer on this device...</p>}
+              {chatMessages.length === 0 && <p className="vr-ai-explanation">Hello! I am your ReqValidator project guide. Choose a question above or type your own. I use the validation results available on this page.</p>}
+              {chatMessages.map((message, index) => <div key={index} style={{ alignSelf: message.role === "user" ? "flex-end" : "stretch", maxWidth: message.role === "user" ? "85%" : "100%", padding: "12px 14px", borderRadius: "12px", background: message.role === "user" ? "rgba(45,212,191,0.16)" : "rgba(127,127,127,0.08)", color: "inherit", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}><strong style={{ display: "block", fontSize: "12px", marginBottom: "5px" }}>{message.role === "user" ? "You" : "ReqValidator guide"}</strong>{message.content}</div>)}
             </div>
             {chatError && <div className="vr-error-banner" role="alert"><AlertTriangle size={16} />{chatError}</div>}
-            <form onSubmit={(event) => { event.preventDefault(); sendChatMessage(); }} style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "12px" }}>
-              <input value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="Ask something about your SRS..." aria-label="Ask a question about your SRS" disabled={chatLoading} style={{ flex: 1, minWidth: 0 }} />
-              <button type="submit" className="vr-primary-button" disabled={chatLoading || !chatInput.trim()}>{chatLoading ? <LoaderCircle size={16} className="vr-spinner" /> : <ArrowRight size={16} />} Send</button>
-            </form>
-            <p className="vr-ai-explanation" style={{ fontSize: "12px" }}>The first message may take longer while the model downloads. Model speed depends on your device. Verify important recommendations before using them as final requirements.</p>
+            <form onSubmit={(event) => { event.preventDefault(); sendChatMessage(); }} style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "12px" }}><input value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="Ask about your score, issues, requirements..." aria-label="Ask a question about your SRS" disabled={chatLoading} style={{ flex: 1, minWidth: 0 }} /><button type="submit" className="vr-primary-button" disabled={chatLoading || !chatInput.trim()}><ArrowRight size={16} /> Send</button></form>
           </div>
         </section>
 
+        {/* Optional open-weight LLM remains separate from offline help */}
+        <section className="vr-section"><div className="vr-ai-prompt"><div className="vr-ai-prompt-icon"><BrainCircuit size={24} /></div><div className="vr-ai-prompt-copy"><h3>Optional open-weight LLM review</h3><p>The first model download requires internet. Your browser may reuse cached model files later on this device; offline availability depends on browser cache and cached assets.</p></div><button type="button" className="vr-primary-button" onClick={runFreeLocalModelReview} disabled={localModelLoading}>{localModelLoading ? <><LoaderCircle size={17} className="vr-spinner" /> Loading model...</> : <><BrainCircuit size={17} /> Download / run LLM review</>}</button></div>
+          {localModelProgress && <div className="vr-ai-explanation" role="status">{localModelProgress}</div>}{localModelError && <div className="vr-error-banner" role="alert"><AlertTriangle size={18} /><span>{localModelError}</span></div>}{localModelReport && <article className="vr-issue-card vr-ai-result-card"><div className="vr-ai-overall"><span>OPEN-WEIGHT MODEL REVIEW</span><strong>Qwen2.5 0.5B Instruct · Local browser inference</strong></div><pre className="vr-ai-explanation" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontFamily: "inherit" }}>{localModelReport}</pre></article>}
+        </section>
         {/* Footer actions */}
         <div className="vr-bottom-actions">
           <Link

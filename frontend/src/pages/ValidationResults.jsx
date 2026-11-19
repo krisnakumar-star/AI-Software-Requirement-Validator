@@ -529,8 +529,6 @@ function ValidationResults() {
     { question: "What should be fixed before approval?", answer: `${poorRequirements + needsImprovement} requirements are currently marked poor or needing improvement. Resolve ambiguity, add measurable acceptance criteria, check dependencies and conflicts, and retest the revised requirements.` },
     { question: "Are the requirements measurable and verifiable?", answer: "For each requirement, define measurable thresholds, boundary cases, failure behavior, and evidence that will prove it has been satisfied." },
   ];
-    ? llmAnalysis.results
-    : [];
 
   const metrics = [
     {

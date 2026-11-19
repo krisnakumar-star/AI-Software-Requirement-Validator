@@ -3,7 +3,7 @@ const TRANSFORMERS_CDN = "https://cdn.jsdelivr.net/npm/@huggingface/transformers
 
 let pipelinePromise;
 
-async function createPipeline(onProgress) {
+async function createPipeline(onProgress, forceWasm = false) {
   // Import at runtime so the application bundle does not need a server-side model package.
   const { pipeline, env } = await import(/* @vite-ignore */ TRANSFORMERS_CDN);
   env.allowLocalModels = false;
@@ -19,6 +19,15 @@ async function createPipeline(onProgress) {
     }
   };
 
+  if (forceWasm) {
+    onProgress?.("Using the stable CPU/WASM mode because WebGPU is unavailable on this device...");
+    return await pipeline("text-generation", MODEL_ID, {
+      device: "wasm",
+      dtype: "q4",
+      progress_callback,
+    });
+  }
+
   try {
     onProgress?.("Trying WebGPU acceleration...");
     return await pipeline("text-generation", MODEL_ID, {
@@ -30,6 +39,7 @@ async function createPipeline(onProgress) {
     console.warn("WebGPU unavailable; falling back to WASM:", webgpuError);
     onProgress?.("WebGPU unavailable. Loading the CPU/WASM version...");
     return await pipeline("text-generation", MODEL_ID, {
+      device: "wasm",
       dtype: "q4",
       progress_callback,
     });
@@ -44,6 +54,27 @@ async function getPipeline(onProgress) {
     });
   }
   return pipelinePromise;
+}
+
+async function runWithWebGpuRecovery(prompt, generationOptions, onProgress) {
+  let generator = await getPipeline(onProgress);
+  try {
+    return await generator(prompt, generationOptions);
+  } catch (webgpuError) {
+    // WebGPU can initialize successfully but fail later during ONNX execution
+    // (for example, a lost GPU device or invalid external instance).
+    console.warn("Local model execution failed; retrying with CPU/WASM:", webgpuError);
+    pipelinePromise = undefined;
+    onProgress?.("GPU execution failed. Switching to CPU/WASM and retrying; this may be slower...");
+    generator = await createPipeline(onProgress, true);
+    pipelinePromise = Promise.resolve(generator);
+    try {
+      return await generator(prompt, generationOptions);
+    } catch (wasmError) {
+      pipelinePromise = undefined;
+      throw new Error(`The local model could not run on this device in WebGPU or CPU mode. Try refreshing the page or using a device with more available memory. Details: ${wasmError.message || wasmError}`);
+    }
+  }
 }
 
 function cleanOutput(output) {
@@ -92,9 +123,8 @@ Then provide cross-requirement observations if multiple requirements are supplie
   const user = `Review these requirement records:\n\n${JSON.stringify(promptData, null, 2)}`;
   const prompt = `<|im_start|>system\n${system}<|im_end|>\n<|im_start|>user\n${user}<|im_end|>\n<|im_start|>assistant\n`;
 
-  const generator = await getPipeline(onProgress);
   onProgress?.("Generating the requirement review on this device...");
-  const result = await generator(prompt, {
+  const result = await runWithWebGpuRecovery(prompt, {
     max_new_tokens: 1200,
     do_sample: false,
     repetition_penalty: 1.08,
@@ -126,9 +156,8 @@ export async function generateSrsChatReply(items, history, question, onProgress)
   }));
   const system = `You are ReqValidator's SRS review assistant. Answer the user's question using the supplied project validation context. Be friendly, clear, concise, and practical. Explain technical terms simply when needed. Refer to requirement IDs or quoted requirement text where possible. If the context does not contain the answer, say what is missing and ask a useful follow-up; do not invent project facts, requirements, scores, or stakeholder decisions. You may give general software requirements guidance, but label it as general guidance. For requests to summarize, give a short structured summary. For requests to improve a requirement, preserve its intent and use [TBD] for unknown details. This is a focused project assistant, not a general-purpose chatbot.`;
   const prompt = `<|im_start|>system\n${system}\n\nPROJECT VALIDATION CONTEXT:\n${JSON.stringify(safeItems, null, 2)}<|im_end|>\n${recentHistory.map((m) => `<|im_start|>${m.role}\n${m.content}<|im_end|>`).join("\n")}\n<|im_start|>user\n${String(question || "").slice(0, 1200)}<|im_end|>\n<|im_start|>assistant\n`;
-  const generator = await getPipeline(onProgress);
   onProgress?.("Thinking about your question using the project context...");
-  const result = await generator(prompt, {
+  const result = await runWithWebGpuRecovery(prompt, {
     max_new_tokens: 420,
     do_sample: false,
     repetition_penalty: 1.08,

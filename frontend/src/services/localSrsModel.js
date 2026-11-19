@@ -107,3 +107,34 @@ Then provide cross-requirement observations if multiple requirements are supplie
   }
   return report;
 }
+
+export async function generateSrsChatReply(items, history, question, onProgress) {
+  const safeItems = (Array.isArray(items) ? items : []).slice(0, 10).map((item, index) => ({
+    id: index + 1,
+    requirement: String(item.requirement || ""),
+    score: item.analysis?.quality_score ?? null,
+    classification: item.analysis?.classification || "Not classified",
+    issues: item.analysis?.issues || [],
+    ambiguities: item.analysis?.ambiguities || [],
+    missing_information: item.analysis?.missing_information || [],
+    suggested_rewrite: item.analysis?.suggested_rewrite || "",
+    explanation: item.analysis?.explanation || "",
+  }));
+  const recentHistory = (Array.isArray(history) ? history : []).slice(-6).map((message) => ({
+    role: message.role === "assistant" ? "assistant" : "user",
+    content: String(message.content || "").slice(0, 1800),
+  }));
+  const system = `You are ReqValidator's SRS review assistant. Answer the user's question using the supplied project validation context. Be friendly, clear, concise, and practical. Explain technical terms simply when needed. Refer to requirement IDs or quoted requirement text where possible. If the context does not contain the answer, say what is missing and ask a useful follow-up; do not invent project facts, requirements, scores, or stakeholder decisions. You may give general software requirements guidance, but label it as general guidance. For requests to summarize, give a short structured summary. For requests to improve a requirement, preserve its intent and use [TBD] for unknown details. This is a focused project assistant, not a general-purpose chatbot.`;
+  const prompt = `<|im_start|>system\n${system}\n\nPROJECT VALIDATION CONTEXT:\n${JSON.stringify(safeItems, null, 2)}<|im_end|>\n${recentHistory.map((m) => `<|im_start|>${m.role}\n${m.content}<|im_end|>`).join("\n")}\n<|im_start|>user\n${String(question || "").slice(0, 1200)}<|im_end|>\n<|im_start|>assistant\n`;
+  const generator = await getPipeline(onProgress);
+  onProgress?.("Thinking about your question using the project context...");
+  const result = await generator(prompt, {
+    max_new_tokens: 420,
+    do_sample: false,
+    repetition_penalty: 1.08,
+    return_full_text: false,
+  });
+  const reply = cleanOutput(result);
+  if (!reply || reply.length < 2) throw new Error("The local model returned an empty answer. Please try again.");
+  return reply;
+}

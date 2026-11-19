@@ -1,5 +1,5 @@
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
@@ -13,13 +13,13 @@ import {
   Clock3,
   RefreshCw,
   LoaderCircle,
-  BrainCircuit,
   Lightbulb,
   Target,
   Search,
   ClipboardCheck,
 } from "lucide-react";
 import { apiUrl } from "../config/api";
+import ResultsWorkspace from "../components/ResultsWorkspace";
 
 function isValidAnalysisResponse(data) {
   if (
@@ -102,15 +102,8 @@ function ValidationResults() {
   const [error, setError] = useState("");
   const [llmError, setLlmError] = useState("");
   const [llmFallbackNotice, setLlmFallbackNotice] = useState("");
-  const [localModelLoading, setLocalModelLoading] = useState(false);
-  const [localModelProgress, setLocalModelProgress] = useState("");
-  const [localModelError, setLocalModelError] = useState("");
-  const [localModelReport, setLocalModelReport] = useState("");
-  const [expandedInsightIds, setExpandedInsightIds] = useState({});
-  const [chatInput, setChatInput] = useState("");
-  const [chatMessages, setChatMessages] = useState([]);
-  const [chatLoading, setChatLoading] = useState(false);
-  const [chatError, setChatError] = useState("");
+  const [projectInfo, setProjectInfo] = useState(null);
+  const autoAnalysisStarted = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -179,6 +172,17 @@ function ValidationResults() {
         }
 
         const requirementsData = await requirementsResponse.json();
+
+        try {
+          const projectResponse = await fetch(apiUrl(`/api/projects/${encodeURIComponent(projectId)}`), {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (projectResponse.ok && !cancelled) {
+            setProjectInfo(await projectResponse.json());
+          }
+        } catch {
+          // Project metadata is optional for this page.
+        }
 
         if (!cancelled) {
           setSummary(summaryData);
@@ -309,14 +313,14 @@ function ValidationResults() {
           results: savedResults,
         });
         setLlmFallbackNotice(
-          "Live cloud analysis is temporarily unavailable (HTTP 502/upstream error). Showing previously saved analysis instead. You can still run the free local Qwen review below."
+          "The analysis service is temporarily unavailable. Showing the previously saved analysis instead."
         );
         setLlmError("");
       } else {
         setLlmError(
           err.message === "Failed to fetch"
-            ? "Cannot connect to the backend AI service. Check the Render AI service and backend configuration."
-            : err.message || "Cloud AI analysis could not be completed. Try the free local LLM review below."
+            ? "Cannot connect to the analysis service. Check that the backend and FastAPI service are running."
+            : err.message || "The detailed analysis could not be completed."
         );
       }
     } finally {
@@ -324,87 +328,13 @@ function ValidationResults() {
     }
   };
 
-  const runFreeLocalModelReview = async () => {
-    setLocalModelLoading(true);
-    setLocalModelError("");
-    setLocalModelReport("");
-    setLocalModelProgress("Loading the open-weight Qwen model into your browser. The first download may take a few minutes.");
-
-    try {
-      // Keep model code out of the initial bundle; this module exists on the current main branch.
-      const { generateSrsReview } = await import("../services/localSrsModel.js");
-      const items = llmResults.length > 0
-        ? llmResults
-        : requirements.map((item) => ({
-            requirement: item.requirementText || "",
-            analysis: {
-              issues: item.issues || [],
-              suggestions: item.suggestions || [],
-              quality_score: item.qualityScore,
-              classification: item.classification || "Not classified",
-            },
-          })).filter((item) => item.requirement.trim());
-
-      if (items.length === 0) {
-        throw new Error("No requirement text is available for review.");
-      }
-
-      const selected = items.slice(0, 8);
-      setLocalModelProgress("The local model is reviewing requirement meaning, gaps, risks, and test ideas...");
-      const report = await generateSrsReview(selected, (message) => setLocalModelProgress(message));
-      setLocalModelReport(report);
-      if (items.length > selected.length) {
-        setLocalModelProgress(`Reviewed the first ${selected.length} requirements. Run additional batches for the remaining requirements.`);
-      } else {
-        setLocalModelProgress("Review completed locally in your browser. No API key was used.");
-      }
-    } catch (err) {
-      console.error("Local open model review failed:", err);
-      setLocalModelError(err.message || "The local model could not be loaded. Try a modern Chrome or Edge browser with WebGPU support.");
-      setLocalModelProgress("");
-    } finally {
-      setLocalModelLoading(false);
+  // Run the local SRS engine automatically after validation (no external AI service involved).
+  useEffect(() => {
+    if (summary && !autoAnalysisStarted.current) {
+      autoAnalysisStarted.current = true;
+      runLlmAnalysis();
     }
-  };
-
-
-  const sendChatMessage = async (promptText = chatInput) => {
-    const question = String(promptText || "").trim();
-    if (!question || chatLoading) return;
-    const userMessage = { role: "user", content: question };
-    const nextHistory = [...chatMessages, userMessage];
-    setChatMessages(nextHistory);
-    setChatInput("");
-    setChatLoading(true);
-    setChatError("");
-    try {
-      const items = llmResults.length > 0 ? llmResults : requirements.map((item) => ({
-        requirement_id: item.requirementId,
-        requirement: item.requirementText || "",
-        analysis: {
-          quality_score: item.qualityScore,
-          classification: item.classification,
-          clarity: item.clarity,
-          completeness: item.completeness,
-          testability: item.testability,
-          issues: item.issues || [],
-          suggestions: item.suggestions || [],
-        },
-      })).filter((item) => item.requirement.trim());
-      const reply = buildOfflineSrsAnswer(question, items, {
-        totalRequirements, score, scoreStatus, goodRequirements,
-        needsImprovement, poorRequirements, duplicateRequirements, inconsistentRequirements,
-      });
-      setChatMessages((current) => [...current, { role: "assistant", content: reply }]);
-    } catch (err) {
-      setChatMessages((current) => current.filter((message, index) => !(index === current.length - 1 && message === userMessage)));
-      setChatInput(question);
-      setChatError(err.message || "The local assistant could not answer. Please try again.");
-    } finally {
-      setChatLoading(false);
-      setLocalModelProgress("");
-    }
-  };
+  }, [summary]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const getStatusClass = (status) => {
     const normalized = (status || "").toUpperCase();
@@ -580,29 +510,6 @@ function ValidationResults() {
   const llmResults = Array.isArray(llmAnalysis?.results)
     ? llmAnalysis.results
     : [];
-
-  const quickReviewSummary = [
-    `Project validation checked ${totalRequirements} requirements and produced an average quality score of ${score}/100 (${scoreStatus}).`,
-    `${goodRequirements} requirements are marked good, ${needsImprovement} need improvement, and ${poorRequirements} are poor.`,
-    `${duplicateRequirements} duplicate and ${inconsistentRequirements} inconsistent requirements were detected.`,
-    issueRequirements.length
-      ? `Prioritize the ${issueRequirements.length} flagged requirements and resolve their listed issues before finalizing the SRS.`
-      : "No requirements were flagged by the current issue-filtering rules. Review the detailed findings before sign-off.",
-  ].join(" ");
-
-  const basicReviewQuestions = [
-    { question: "What is this project expected to do?", answer: requirements[0]?.requirementText ? `Start with this requirement: “${requirements[0].requirementText}”. Explain the user need and expected outcome in simple terms.` : "Describe the main purpose of the system, its users, and the problem it solves." },
-    { question: "Who will use the system?", answer: "Identify each user role or external system that interacts with the product, and state what each one is allowed to do." },
-    { question: "What are the main functions?", answer: `There are ${requirements.length} requirements in this project. Review each one as a distinct function or system constraint and group related requirements into features.` },
-    { question: "How can we test a requirement?", answer: "Write a test with a clear starting condition, user action or input, and an observable expected result. Avoid vague words unless they have measurable criteria." },
-  ];
-
-  const importantReviewQuestions = [
-    { question: "Which requirements are most at risk?", answer: issueRequirements.length ? issueRequirements.slice(0, 5).map((req, i) => `${req.requirementId || `REQ-${i + 1}`}: ${(req.issues || []).join("; ") || req.status || "Needs review"}`).join("\n") : "No flagged requirements were found by the current issue-filtering rules. Manually review critical and security-related requirements." },
-    { question: "What details are missing?", answer: llmResults.flatMap((item) => (item.analysis?.missing_information || []).map((entry) => `${item.requirement_id || "Requirement"}: ${entry}`)).slice(0, 8).join("\n") || "Confirm the actor, trigger, expected result, constraints, and measurable acceptance criteria for each requirement." },
-    { question: "What should be fixed before approval?", answer: `${poorRequirements + needsImprovement} requirements are currently marked poor or needing improvement. Resolve ambiguity, add measurable acceptance criteria, check dependencies and conflicts, and retest the revised requirements.` },
-    { question: "Are the requirements measurable and verifiable?", answer: "For each requirement, define measurable thresholds, boundary cases, failure behavior, and evidence that will prove it has been satisfied." },
-  ];
 
   const metrics = [
     {
@@ -949,272 +856,19 @@ function ValidationResults() {
           </div>
         </details>
 
-        <details className="vr-disclosure vr-section vr-ai-disclosure">
-          <summary><span><small>OPTIONAL ADVANCED REVIEW</small><strong>AI analysis & local model</strong><em>Open detailed findings or run the downloadable Qwen model</em></span><span className="vr-disclosure-count">Open AI tools</span></summary>
-          <div className="vr-disclosure-body">
-        {/* Optional AI analysis */}
-        <section className="vr-section vr-ai-section">
-          <div className="vr-section-heading">
-            <div>
-              <span className="vr-eyebrow">AI-POWERED REVIEW</span>
-              <h2>Detailed AI analysis</h2>
-              <p>
-                Run the integrated AI analysis to view explanations,
-                quality-attribute findings, and recommendations.
-              </p>
-            </div>
+        <ResultsWorkspace
+          projectName={projectInfo?.name}
+          items={llmResults}
+          report={llmAnalysis?.document_report || projectInfo?.analysisReport || null}
+          engineState={{ loading: llmLoading, error: llmError || llmFallbackNotice }}
+          onRerun={runLlmAnalysis}
+          offlineAnswer={(question) => buildOfflineSrsAnswer(question, llmResults.length ? llmResults : requirements.map((item) => ({
+            requirement_id: item.requirementId,
+            requirement: item.requirementText || "",
+            analysis: { quality_score: item.qualityScore, issues: item.issues || [], suggested_rewrite: "" },
+          })), { totalRequirements, score, scoreStatus, goodRequirements, needsImprovement, poorRequirements, duplicateRequirements, inconsistentRequirements })}
+        />
 
-            <span className="vr-ai-heading-icon">
-              <BrainCircuit size={24} />
-            </span>
-          </div>
-
-          <div className="vr-ai-prompt">
-            <div className="vr-ai-prompt-icon">
-              <BrainCircuit size={24} />
-            </div>
-            <div className="vr-ai-prompt-copy">
-              <h3>Free open-weight LLM · Runs in your browser</h3>
-              <p>
-                Load Qwen2.5 0.5B Instruct locally using WebAssembly/WebGPU.
-                No provider API key or paid inference endpoint is required.
-                The first model download can be large and generation speed depends on your device.
-              </p>
-            </div>
-            <button
-              type="button"
-              className="vr-primary-button"
-              onClick={runFreeLocalModelReview}
-              disabled={localModelLoading}
-            >
-              {localModelLoading ? (
-                <>
-                  <LoaderCircle size={17} className="vr-spinner" />
-                  Loading model...
-                </>
-              ) : (
-                <>
-                  <BrainCircuit size={17} />
-                  Run free local LLM review
-                </>
-              )}
-            </button>
-          </div>
-
-          {localModelProgress && (
-            <div className="vr-ai-explanation" role="status">{localModelProgress}</div>
-          )}
-          {localModelError && (
-            <div className="vr-error-banner" role="alert">
-              <AlertTriangle size={18} />
-              <span>{localModelError}</span>
-            </div>
-          )}
-          {localModelReport && (
-            <article className="vr-issue-card vr-ai-result-card">
-              <div className="vr-ai-overall">
-                <span>OPEN-WEIGHT MODEL REVIEW</span>
-                <strong>Qwen2.5 0.5B Instruct · Local browser inference</strong>
-              </div>
-              <pre className="vr-ai-explanation" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontFamily: "inherit" }}>
-                {localModelReport}
-              </pre>
-            </article>
-          )}
-
-          {!llmAnalysis && (
-            <div className="vr-ai-prompt">
-              <div className="vr-ai-prompt-icon">
-                <Sparkles size={24} />
-              </div>
-              <div className="vr-ai-prompt-copy">
-                <h3>Explore deeper requirement insights</h3>
-                <p>
-                  The AI analysis can provide attribute-level findings
-                  and recommendations when returned by your AI service.
-                </p>
-              </div>
-
-              <button
-                type="button"
-                className="vr-primary-button"
-                onClick={runLlmAnalysis}
-                disabled={llmLoading}
-              >
-                {llmLoading ? (
-                  <>
-                    <LoaderCircle size={17} className="vr-spinner" />
-                    Analyzing...
-                  </>
-                ) : (
-                  <>
-                    <BrainCircuit size={17} />
-                    Analyze with AI
-                  </>
-                )}
-              </button>
-            </div>
-          )}
-
-          {llmFallbackNotice && (
-            <div className="vr-ai-explanation" role="status">
-              {llmFallbackNotice}
-            </div>
-          )}
-          {llmError && (
-            <div className="vr-error-banner" role="alert">
-              <AlertTriangle size={18} />
-              <span>{llmError}</span>
-              <button
-                type="button"
-                onClick={runLlmAnalysis}
-                disabled={llmLoading}
-              >
-                Try again
-              </button>
-            </div>
-          )}
-
-          {llmAnalysis && (
-            <div className="vr-ai-results">
-              <div className="vr-ai-summary">
-                <span className="vr-ai-summary-icon">
-                  <CheckCircle2 size={21} />
-                </span>
-                <div>
-                  <h3>AI analysis response received</h3>
-                  <p>
-                    Requirements reported by the AI service:{" "}
-                    {llmAnalysis.total_requirements ?? llmResults.length}
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  className="vr-secondary-button"
-                  onClick={runLlmAnalysis}
-                  disabled={llmLoading}
-                >
-                  {llmLoading ? (
-                    <LoaderCircle size={15} className="vr-spinner" />
-                  ) : (
-                    <RefreshCw size={15} />
-                  )}
-                  Run again
-                </button>
-              </div>
-
-              {llmResults.length === 0 ? (
-                <div className="vr-empty-card">
-                  <p>
-                    The AI service returned no individual requirement
-                    analysis results.
-                  </p>
-                </div>
-              ) : (
-                <div className="vr-issues-list">
-                  {llmResults.map((result, index) => {
-                    const analysis = result.analysis || {};
-
-                    return (
-                      <article
-                        className="vr-issue-card vr-ai-result-card"
-                        key={result.requirement_id ?? index}
-                      >
-                        <div className="vr-original-requirement">
-                          <span>
-                            REQUIREMENT{" "}
-                            {result.requirement_id || `#${index + 1}`}
-                          </span>
-                          <p>{result.requirement || "No text provided."}</p>
-                        </div>
-
-                        <div className="vr-ai-overall">
-                          <span>Quick insight</span>
-                          <strong>{analysis.quality_score}/100 · {analysis.classification}</strong>
-                        </div>
-                        <div className="vr-issue-metadata">
-                          <span>Clarity: {analysis.clarity || "—"}</span>
-                          <span>Completeness: {analysis.completeness || "—"}</span>
-                          <span>Testability: {analysis.testability || "—"}</span>
-                        </div>
-                        <p className="vr-ai-explanation">
-                          {analysis.explanation
-                            ? `${analysis.explanation.slice(0, 220)}${analysis.explanation.length > 220 ? "…" : ""}`
-                            : "Review the detailed findings for more information."}
-                        </p>
-                        <button
-                          type="button"
-                          className="vr-secondary-button"
-                          onClick={() => setExpandedInsightIds((current) => ({
-                            ...current,
-                            [result.requirement_id ?? index]: !current[result.requirement_id ?? index],
-                          }))}
-                          aria-expanded={Boolean(expandedInsightIds[result.requirement_id ?? index])}
-                        >
-                          {expandedInsightIds[result.requirement_id ?? index]
-                            ? "Hide full insights"
-                            : "View full insights"}
-                        </button>
-
-                        {expandedInsightIds[result.requirement_id ?? index] && (
-                          <div className="vr-ai-full-insights">
-                            <div className="vr-issue-metadata">
-                              <span>Feasibility: {analysis.feasibility || "—"}</span>
-                              <span>Consistency: {analysis.consistency || "—"}</span>
-                            </div>
-                            {analysis.explanation && (
-                              <p className="vr-ai-explanation">{analysis.explanation}</p>
-                            )}
-                            {[
-                              ["Ambiguities", analysis.ambiguities],
-                              ["Missing information", analysis.missing_information],
-                              ["Issues", analysis.issues],
-                            ].map(([title, items]) => Array.isArray(items) && items.length > 0 && (
-                              <div className="vr-detail-block" key={title}>
-                                <h4><AlertTriangle size={16} />{title}</h4>
-                                <ul>{items.map((item, itemIndex) => <li key={itemIndex}>{item}</li>)}</ul>
-                              </div>
-                            ))}
-                            {analysis.suggested_rewrite && (
-                              <div className="vr-suggestion-block">
-                                <h4><Lightbulb size={16} />Suggested rewrite</h4>
-                                <p>{analysis.suggested_rewrite}</p>
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </article>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-        </section>
-
-          </div>
-        </details>
-
-        {/* Instant offline assistant: deterministic answers, no model/API */}
-        <section className="vr-section vr-quick-review vr-assistant-section">
-          <div className="vr-section-heading"><div><span className="vr-eyebrow">OFFLINE PROJECT GUIDE</span><h2>Ask about your SRS</h2><p>Get quick explanations and practical next steps. Works instantly without a model or API.</p></div><span className="vr-ai-heading-icon"><ShieldCheck size={24} /></span></div>
-          <div className="vr-quick-review-buttons" style={{ display: "flex", flexWrap: "wrap", gap: "10px", marginBottom: "16px" }}>
-            {["Summarize my SRS", "What should I fix first?", "What information is missing?", "How do I write acceptance criteria?"].map((prompt) => <button key={prompt} type="button" className="vr-secondary-button" disabled={chatLoading} onClick={() => sendChatMessage(prompt)}>{prompt}</button>)}
-          </div>
-          <div className="vr-issue-card vr-chat-panel"><div className="vr-ai-overall"><span>INSTANT OFFLINE HELP</span><strong>No model · No API · No waiting</strong></div>
-            <div className="vr-chat-messages" aria-live="polite" style={{ display: "flex", flexDirection: "column", gap: "12px", maxHeight: "440px", overflowY: "auto", padding: "12px 0" }}>
-              {chatMessages.length === 0 && <p className="vr-ai-explanation">Hello! I am your ReqValidator project guide. Choose a question above or type your own. I use the validation results available on this page.</p>}
-              {chatMessages.map((message, index) => <div key={index} style={{ alignSelf: message.role === "user" ? "flex-end" : "stretch", maxWidth: message.role === "user" ? "85%" : "100%", padding: "12px 14px", borderRadius: "12px", background: message.role === "user" ? "rgba(45,212,191,0.16)" : "rgba(127,127,127,0.08)", color: "inherit", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}><strong style={{ display: "block", fontSize: "12px", marginBottom: "5px" }}>{message.role === "user" ? "You" : "ReqValidator guide"}</strong>{message.content}</div>)}
-            </div>
-            {chatError && <div className="vr-error-banner" role="alert"><AlertTriangle size={16} />{chatError}</div>}
-            <form onSubmit={(event) => { event.preventDefault(); sendChatMessage(); }} style={{ display: "flex", gap: "10px", alignItems: "center", marginTop: "12px" }}><input value={chatInput} onChange={(event) => setChatInput(event.target.value)} placeholder="Ask about your score, issues, requirements..." aria-label="Ask a question about your SRS" disabled={chatLoading} style={{ flex: 1, minWidth: 0 }} /><button type="submit" className="vr-primary-button" disabled={chatLoading || !chatInput.trim()}><ArrowRight size={16} /> Send</button></form>
-          </div>
-        </section>
-
-        {/* Optional open-weight LLM remains separate from offline help */}
-        <section className="vr-section"><div className="vr-ai-prompt"><div className="vr-ai-prompt-icon"><BrainCircuit size={24} /></div><div className="vr-ai-prompt-copy"><h3>Optional open-weight LLM review</h3><p>The first model download requires internet. Your browser may reuse cached model files later on this device; offline availability depends on browser cache and cached assets.</p></div><button type="button" className="vr-primary-button" onClick={runFreeLocalModelReview} disabled={localModelLoading}>{localModelLoading ? <><LoaderCircle size={17} className="vr-spinner" /> Loading model...</> : <><BrainCircuit size={17} /> Download / run LLM review</>}</button></div>
-          {localModelProgress && <div className="vr-ai-explanation" role="status">{localModelProgress}</div>}{localModelError && <div className="vr-error-banner" role="alert"><AlertTriangle size={18} /><span>{localModelError}</span></div>}{localModelReport && <article className="vr-issue-card vr-ai-result-card"><div className="vr-ai-overall"><span>OPEN-WEIGHT MODEL REVIEW</span><strong>Qwen2.5 0.5B Instruct · Local browser inference</strong></div><pre className="vr-ai-explanation" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontFamily: "inherit" }}>{localModelReport}</pre></article>}
-        </section>
         {/* Footer actions */}
         <div className="vr-bottom-actions">
           <Link

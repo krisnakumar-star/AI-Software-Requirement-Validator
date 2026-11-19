@@ -43,6 +43,24 @@ public class Requirement {
     private Integer qualityScore;
     private String status;
     private Map<String, Object> aiAnalysis;
+    private String sourceSection;
+    private String sourceDocument;
+
+    public String getSourceSection() {
+        return sourceSection;
+    }
+
+    public void setSourceSection(String sourceSection) {
+        this.sourceSection = sourceSection;
+    }
+
+    public String getSourceDocument() {
+        return sourceDocument;
+    }
+
+    public void setSourceDocument(String sourceDocument) {
+        this.sourceDocument = sourceDocument;
+    }
 
     public Requirement() {
     }

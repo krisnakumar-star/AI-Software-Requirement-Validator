@@ -1,62 +1,52 @@
-# AI Software Requirement Validator
+# AI Software Requirement Validator (ReqValidator)
 
-A web application for managing and reviewing Software Requirements Specifications (SRS), with a lightweight Python analysis service.
+A web application for managing and reviewing Software Requirements Specifications (SRS).
+All analysis is performed locally — **no cloud AI APIs, no AI-provider keys, no paid inference**.
 
-## Analysis service
+Architecture: React + Vite → Spring Boot (Java 21, MongoDB) → FastAPI analysis service (Python). Optional Qwen LLM runs inside the user's browser.
 
-The FastAPI service provides:
-- Multi-label classification for functional, non-functional quality attributes, technical constraints, user stories, business rules, data, interface/integration, privacy and compliance requirements.
-- Separate clarity, completeness, testability, atomicity and consistency indicator scores.
-- Attribute-specific checks for performance, security, availability, reliability, usability, compatibility, maintainability, privacy, integrations, data rules and standards compliance.
-- Detection of vague wording, missing actors/actions, unclear references, open-ended scope, compound requirements, missing triggers/outcomes, weak measurable targets and missing exception paths.
-- Severity-coded findings with recommendations, explanations, and cautious rewrite guidance that does not invent stakeholder thresholds.
-- An expert-style review report with an executive summary, risk verdict, strengths, dimension-by-dimension assessment, detailed reasoning, stakeholder clarification questions, draft acceptance criteria, illustrative positive/negative/regression test scenarios, and a prioritized improvement plan.
-- Batch-level category summaries, average score, possible duplicate detection and possible cross-requirement conflicts.
-- Existing single-analysis response fields are preserved; detailed findings are exposed separately for richer clients.
+## Three separate AI capabilities
 
-**Implementation note:** the current analyzer is a deterministic, model-free NLP/heuristic engine. It does not download model weights, call an external AI provider, require paid API credits, or claim to be a generative LLM. Its score is a textual quality indicator and should be reviewed by a requirements engineer.
+| Feature | What it is | Needs a download? |
+|---|---|---|
+| **SRS analysis engine** (FastAPI) | Deterministic NLP + rules engine; runs automatically on the results page | No |
+| **Instant Offline Guide** | Rule-based answers about the report — not an LLM | No |
+| **Local AI Chat / Deep Review** | Real `onnx-community/Qwen2.5-0.5B-Instruct` generation in the browser (Transformers.js, ONNX Runtime, WebGPU → WASM fallback) | Yes, once (cached by the browser) |
 
-## Render deployment
+## Analysis engine (`ai-service/srs_engine`)
 
-Create a Python Web Service with Root Directory `ai-service`.
+- **Parsing:** actor, modal/obligation, main action, object, triggers, schedules, measurable constraints (with units and comparators), references, user-story parts.
+- **Classification:** functional, non-functional, constraint, business rule, user story; categories for security, performance, availability, reliability, usability, compatibility, maintainability, privacy, data, interface/integration, compliance, scalability.
+- **~35 defect checks**, each with evidence, why it matters, a recommendation and a clarification question: vague/ambiguous terms, missing actor/action/outcome, incomplete, not testable, non-atomic, missing pre/postconditions, inputs, outputs, exception handling, validation rules, authorization, security constraints, performance thresholds, measurable targets, unclear references, open-ended scope, terminology, unidentified dependencies, boundaries, triggers, data constraints, incomplete business rules, acceptance criteria, failure/recovery, unrealistic commitments.
+- **Explainable scores:** eight dimensions (clarity, completeness, testability, atomicity, consistency, verifiability, feasibility, traceability), each 100 minus documented deductions. Overall = 40% weighted dimension average + 60% per-finding penalty, with documented caps. Every deduction is listed in `score_breakdown`.
+- **Generated review:** strengths, improved draft with `[TBD]` placeholders (never invented values), questions, Given/When/Then acceptance criteria, positive/negative/boundary tests, priority with reason.
+- **Document level:** duplicates (TF-IDF similarity), possible contradictions (polarity, conflicting thresholds, obligation level, opposing terms, access scope), dependencies (explicit references, data lifecycle, login preconditions), terminology consistency, coverage gaps, likely missing requirements, traceability (generated/duplicate IDs, broken references, matrix), risks, executive summary and prioritised improvement plan.
+- **Optional semantic similarity:** `pip install -r requirements-optional.txt && python setup_models.py`, then set `SRS_SEMANTIC_MODEL`. Loaded lazily from local files only; falls back to TF-IDF. Not recommended on 512 MB free tiers.
 
-- Build command: `pip install -r requirements.txt`
-- Start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
-- Runtime: Python 3.11 or newer.
-- Environment variable: `SRS_API_KEY` (private random value).
-- Set the exact same value in Spring Boot as `LLM_API_KEY`.
-- No model download, persistent model disk, GPU, JarvisClaw account, or paid AI provider is required.
+The engine is deterministic: findings are review signals, not proof, and it does not claim to be a trained neural network.
 
-Keep the existing Spring Boot configuration:
-- `LLM_API_URL=https://<your-ai-service>.onrender.com`
-- `LLM_API_KEY=<same value as SRS_API_KEY>`
+## Document processing
 
+PDF, DOCX, DOC and TXT. Original requirement IDs (`REQ-001`, `FR-1`, `NFR-2.1`, `3.2.1`) and section headings are preserved; lines wrapped by PDF extraction are joined; exact duplicates are reported; empty, scanned, corrupted or requirement-free documents return clear errors.
 
+## Deployment (Render / Vercel / MongoDB Atlas)
 
-## Free open-weight LLM in the browser
+FastAPI service (Root Directory `ai-service`): build `pip install -r requirements.txt`, start `uvicorn main:app --host 0.0.0.0 --port $PORT`, env `SRS_API_KEY`.
+Spring Boot: `LLM_API_URL=https://<ai-service>.onrender.com`, `LLM_API_KEY=<same as SRS_API_KEY>`, `MONGODB_URI`, `JWT_SECRET`.
+`SRS_API_KEY`/`LLM_API_KEY` is only an **internal service-to-service key**; it is never sent to the browser and is not an AI-provider key. No GPU or model download is needed on the server.
 
-The Validation Results page includes an optional local-model review using `onnx-community/Qwen2.5-0.5B-Instruct` through Transformers.js. The model runs on the visitor's device using WebGPU when available and falls back to WASM/CPU. It does not require a provider API key or paid inference API. Model files are downloaded from Hugging Face on first use and may be cached by the browser; first load can take time and performance depends on the user's hardware. The existing FastAPI rule-based analysis remains available and supplies deterministic checks and scores. The small 0.5B model generates additional natural-language explanations, clarification questions, draft acceptance criteria and test ideas; it should not be treated as an expert substitute or a guarantee of correctness.
-
-This browser-side option avoids putting LLM weights on the Render free service. Render free web services have resource and ephemeral-filesystem limitations; they also spin down when idle. See the [Render free service limitations](https://render.com/docs/free). Transformers.js runs supported models in the browser with ONNX Runtime and WebGPU/WASM; see [Transformers.js documentation](https://huggingface.co/docs/transformers.js/en/index) and the [Qwen2.5 0.5B ONNX model card](https://huggingface.co/onnx-community/Qwen2.5-0.5B-Instruct).
-
-## Local development
+## Local development & tests
 
 ```bash
-cd ai-service
-python -m venv .venv
-# Windows: .venv\\Scripts\\activate
-# macOS/Linux: source .venv/bin/activate
-python -m pip install -r requirements.txt
+cd ai-service && python -m venv .venv && .venv/Scripts/activate   # or source .venv/bin/activate
+pip install -r requirements.txt -r requirements-dev.txt
+python -m unittest -v test_engine          # engine + API tests
+uvicorn main:app --port 8001
+
+cd backend && ./mvnw test                   # needs JWT_SECRET, LLM_API_KEY env vars
+cd frontend && npm install && npm run lint && npm run build
 ```
-
-Set `SRS_API_KEY`, then run:
-
-```bash
-uvicorn main:app --host 0.0.0.0 --port 8001
-```
-
-The API endpoints are `GET /`, `GET /health`, `POST /analyze`, and `POST /analyze-batch`. The single and batch response structures retain the fields used by the existing backend.
 
 ## Security
 
-Never commit API keys, database credentials, JWT secrets, or production environment files. Keep the AI service private behind its internal API key. The browser must communicate through Spring Boot and must never receive service credentials.
+Never commit API keys, database credentials, JWT secrets, or `.env` files. The browser talks only to Spring Boot; the local Qwen model sends nothing to any server.

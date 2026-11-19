@@ -43,11 +43,14 @@ public class DocumentController {
     private final RequirementRepository requirementRepository;
     private final DocumentRepository documentRepository;
     private final ProjectRepository projectRepository;
+    private final com.reqvalidator.backend.service.RequirementExtractionService extractionService;
 
     public DocumentController(
             RequirementRepository requirementRepository,
             DocumentRepository documentRepository,
-            ProjectRepository projectRepository) {
+            ProjectRepository projectRepository,
+            com.reqvalidator.backend.service.RequirementExtractionService extractionService) {
+        this.extractionService = extractionService;
 
         this.requirementRepository = requirementRepository;
         this.documentRepository = documentRepository;
@@ -216,6 +219,7 @@ public class DocumentController {
 
             String extractedText;
 
+            try {
             if (extension.equals("pdf")) {
 
                 extractedText =
@@ -245,15 +249,33 @@ public class DocumentController {
                                 StandardCharsets.UTF_8
                         );
             }
+            } catch (IOException | RuntimeException extractionError) {
+                return ResponseEntity
+                        .badRequest()
+                        .body("The document could not be read. It may be corrupted, password-protected, or not a valid "
+                                + extension.toUpperCase() + " file.");
+            }
+
+            if (extractedText == null || extractedText.isBlank()) {
+                return ResponseEntity
+                        .badRequest()
+                        .body("No readable text was found in the document. Scanned or image-only PDFs are not supported.");
+            }
 
             // -------------------------------------------------
             // 11. Extract requirements
             // -------------------------------------------------
 
-            List<String> extractedRequirements =
-                    extractRequirements(
-                            extractedText
-                    );
+            com.reqvalidator.backend.service.RequirementExtractionService.ExtractionResult extraction =
+                    extractionService.extract(extractedText);
+            var extractedRequirements = extraction.requirements();
+
+            if (extractedRequirements.isEmpty()) {
+                return ResponseEntity
+                        .badRequest()
+                        .body("No requirements were detected. Requirements should contain 'shall', 'must', 'should' or 'will', "
+                                + "or be listed as bullets/IDs under a 'Requirements' heading.");
+            }
 
             // -------------------------------------------------
             // 12. Save document metadata
@@ -305,8 +327,14 @@ public class DocumentController {
             // 14. Save extracted requirements
             // -------------------------------------------------
 
-            for (String requirementText :
+            java.util.Set<String> usedIds = new java.util.HashSet<>();
+            requirementRepository.findByProjectId(projectId)
+                    .forEach(existing -> usedIds.add(String.valueOf(existing.getRequirementId())));
+
+            for (var extracted :
                     extractedRequirements) {
+
+                String requirementText = extracted.text();
 
                 Requirement requirement =
                         new Requirement();
@@ -315,12 +343,16 @@ public class DocumentController {
                         projectId
                 );
 
-                requirement.setRequirementId(
-                        String.format(
-                                "REQ-%03d",
-                                requirementNumber
-                        )
-                );
+                String requirementId = extracted.sourceId();
+                if (requirementId == null || usedIds.contains(requirementId)) {
+                    do {
+                        requirementId = String.format("REQ-%03d", requirementNumber++);
+                    } while (usedIds.contains(requirementId));
+                }
+                usedIds.add(requirementId);
+                requirement.setRequirementId(requirementId);
+                requirement.setSourceSection(extracted.section());
+                requirement.setSourceDocument(fileName);
 
                 requirement.setRequirementText(
                         requirementText
@@ -360,7 +392,6 @@ public class DocumentController {
                 );
 
                 savedCount++;
-                requirementNumber++;
             }
 
             // -------------------------------------------------
@@ -382,9 +413,10 @@ public class DocumentController {
                             + "\n\n"
                             + "Requirements extracted: "
                             + savedCount
+                            + (extraction.warnings().isEmpty() ? "" : "\nNotes: " + String.join(" ", extraction.warnings()))
                             + "\n\n"
                             + "Extracted Text:\n\n"
-                            + extractedText;
+                            + (extractedText.length() > 20000 ? extractedText.substring(0, 20000) + "\n[truncated]" : extractedText);
 
             return ResponseEntity.ok(
                     response

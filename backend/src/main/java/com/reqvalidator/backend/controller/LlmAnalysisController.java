@@ -184,6 +184,8 @@ public class LlmAnalysisController {
             requestItem.put("requirement", item.getRequirementText());
             requestItem.put("source", project.getName());
             requestItem.put("section_number", item.getRequirementId());
+            requestItem.put("requirement_id", item.getRequirementId());
+            requestItem.put("section", item.getSourceSection());
             return requestItem;
         }).toList();
 
@@ -203,6 +205,15 @@ public class LlmAnalysisController {
             Requirement requirement = validRequirements.get(i);
             requirement.setAiAnalysis(analysis);
             requirementRepository.save(requirement);
+        }
+
+        Object report = normalizedResponse.get("document_report");
+        if (report instanceof Map<?, ?> reportMap) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> typedReport = (Map<String, Object>) reportMap;
+            project.setAnalysisReport(typedReport);
+            project.setAnalysisUpdatedAt(java.time.Instant.now().toString());
+            projectRepository.save(project);
         }
 
         // -----------------------------------------------------
@@ -280,6 +291,12 @@ public class LlmAnalysisController {
             normalized.put("model", response.path("model").asText());
         }
         normalized.put("total_requirements", results.size());
+        if (response.path("document_report").isObject()) {
+            normalized.put("document_report", objectMapper.convertValue(response.path("document_report"), Map.class));
+        }
+        if (response.hasNonNull("engine_version")) {
+            normalized.put("engine_version", response.path("engine_version").asText());
+        }
         normalized.put("results", results);
         return normalized;
     }
@@ -316,6 +333,13 @@ public class LlmAnalysisController {
             validated.put(field, objectMapper.convertValue(
                     analysis.path(field), objectMapper.getTypeFactory().constructCollectionType(List.class, String.class)));
         }
+        // Pass through the richer, already-structured engine output (findings, scores, drafts, tests).
+        analysis.properties().forEach(entry -> {
+            String key = entry.getKey();
+            if (!validated.containsKey(key) && !key.equals("requirement") && !key.equals("requirement_number")) {
+                validated.put(key, objectMapper.convertValue(entry.getValue(), Object.class));
+            }
+        });
         return validated;
     }
 

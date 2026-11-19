@@ -13,6 +13,24 @@ public class Project {
     private String description;
     private String ownerEmail;
     private String status;
+    private java.util.Map<String, Object> analysisReport;
+    private String analysisUpdatedAt;
+
+    public java.util.Map<String, Object> getAnalysisReport() {
+        return analysisReport;
+    }
+
+    public void setAnalysisReport(java.util.Map<String, Object> analysisReport) {
+        this.analysisReport = analysisReport;
+    }
+
+    public String getAnalysisUpdatedAt() {
+        return analysisUpdatedAt;
+    }
+
+    public void setAnalysisUpdatedAt(String analysisUpdatedAt) {
+        this.analysisUpdatedAt = analysisUpdatedAt;
+    }
 
     public Project() {
     }

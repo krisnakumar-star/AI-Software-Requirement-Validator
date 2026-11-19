@@ -67,3 +67,6 @@ HELP.md
 
 backend/boot-error.txt
 
+
+# Optional local embedding models
+ai-service/models/

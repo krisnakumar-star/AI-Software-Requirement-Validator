@@ -235,8 +235,8 @@ public class LlmAnalysisController {
 
         JsonNode analyses = response.path("analyses");
         if (!analyses.isArray()) {
-            // Accept the earlier Spring-facing envelope as well as FastAPI's
-            // native JarvisClaw envelope (analyses with flattened fields).
+            // Accept the current FastAPI batch envelope (analyses with flattened fields)
+            // and the legacy Spring-facing results envelope.
             analyses = response.path("results");
         }
         if (!analyses.isArray() || analyses.size() != requirements.size()) {

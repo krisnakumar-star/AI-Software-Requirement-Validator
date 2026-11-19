@@ -75,6 +75,7 @@ function ValidationResults() {
   const [localModelError, setLocalModelError] = useState("");
   const [localModelReport, setLocalModelReport] = useState("");
   const [expandedInsightIds, setExpandedInsightIds] = useState({});
+  const [reviewAction, setReviewAction] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -503,6 +504,31 @@ function ValidationResults() {
   });
 
   const llmResults = Array.isArray(llmAnalysis?.results)
+    ? llmAnalysis.results
+    : [];
+
+  const quickReviewSummary = [
+    `Project validation checked ${totalRequirements} requirements and produced an average quality score of ${score}/100 (${scoreStatus}).`,
+    `${goodRequirements} requirements are marked good, ${needsImprovement} need improvement, and ${poorRequirements} are poor.`,
+    `${duplicateRequirements} duplicate and ${inconsistentRequirements} inconsistent requirements were detected.`,
+    issueRequirements.length
+      ? `Prioritize the ${issueRequirements.length} flagged requirements and resolve their listed issues before finalizing the SRS.`
+      : "No requirements were flagged by the current issue-filtering rules. Review the detailed findings before sign-off.",
+  ].join(" ");
+
+  const basicReviewQuestions = [
+    { question: "What is this project expected to do?", answer: requirements[0]?.requirementText ? `Start with this requirement: “${requirements[0].requirementText}”. Explain the user need and expected outcome in simple terms.` : "Describe the main purpose of the system, its users, and the problem it solves." },
+    { question: "Who will use the system?", answer: "Identify each user role or external system that interacts with the product, and state what each one is allowed to do." },
+    { question: "What are the main functions?", answer: `There are ${requirements.length} requirements in this project. Review each one as a distinct function or system constraint and group related requirements into features.` },
+    { question: "How can we test a requirement?", answer: "Write a test with a clear starting condition, user action or input, and an observable expected result. Avoid vague words unless they have measurable criteria." },
+  ];
+
+  const importantReviewQuestions = [
+    { question: "Which requirements are most at risk?", answer: issueRequirements.length ? issueRequirements.slice(0, 5).map((req, i) => `${req.requirementId || `REQ-${i + 1}`}: ${(req.issues || []).join("; ") || req.status || "Needs review"}`).join("\n") : "No flagged requirements were found by the current issue-filtering rules. Manually review critical and security-related requirements." },
+    { question: "What details are missing?", answer: llmResults.flatMap((item) => (item.analysis?.missing_information || []).map((entry) => `${item.requirement_id || "Requirement"}: ${entry}`)).slice(0, 8).join("\n") || "Confirm the actor, trigger, expected result, constraints, and measurable acceptance criteria for each requirement." },
+    { question: "What should be fixed before approval?", answer: `${poorRequirements + needsImprovement} requirements are currently marked poor or needing improvement. Resolve ambiguity, add measurable acceptance criteria, check dependencies and conflicts, and retest the revised requirements.` },
+    { question: "Are the requirements measurable and verifiable?", answer: "For each requirement, define measurable thresholds, boundary cases, failure behavior, and evidence that will prove it has been satisfied." },
+  ];
     ? llmAnalysis.results
     : [];
 
@@ -1076,6 +1102,33 @@ function ValidationResults() {
                 </div>
               )}
             </div>
+          )}
+        </section>
+
+        {/* Quick review actions: fixed prompts, not a chatbot */}
+        <section className="vr-section vr-quick-review">
+          <div className="vr-section-heading">
+            <div>
+              <span className="vr-eyebrow">QUICK REVIEW</span>
+              <h2>Explore your report</h2>
+              <p>Choose a topic to get a focused explanation from your validation results.</p>
+            </div>
+          </div>
+          <div className="vr-bottom-actions vr-quick-review-buttons">
+            <button type="button" className="vr-secondary-button" onClick={() => setReviewAction("summary")}><FileText size={16} /> Summarize report</button>
+            <button type="button" className="vr-secondary-button" onClick={() => setReviewAction("basic")}><Lightbulb size={16} /> Basic questions</button>
+            <button type="button" className="vr-secondary-button" onClick={() => setReviewAction("important")}><Target size={16} /> Important questions</button>
+          </div>
+          {reviewAction === "summary" && <article className="vr-issue-card vr-quick-review-answer"><h3><Sparkles size={17} /> Report summary</h3><p>{quickReviewSummary}</p></article>}
+          {(reviewAction === "basic" || reviewAction === "important") && (
+            <article className="vr-issue-card vr-quick-review-answer">
+              <h3>{reviewAction === "basic" ? "Basic questions" : "Important review questions"}</h3>
+              <div className="vr-quick-question-list">
+                {(reviewAction === "basic" ? basicReviewQuestions : importantReviewQuestions).map((item, index) => (
+                  <details className="vr-quick-question" key={item.question} open={index === 0}><summary>{item.question}</summary><p style={{ whiteSpace: "pre-wrap" }}>{item.answer}</p></details>
+                ))}
+              </div>
+            </article>
           )}
         </section>
 

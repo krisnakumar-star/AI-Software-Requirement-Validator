@@ -848,7 +848,7 @@ function ValidationResults() {
               projectName={projectInfo?.name}
               items={llmResults}
               report={llmAnalysis?.document_report || projectInfo?.analysisReport || null}
-              engineState={{ loading: llmLoading, error: llmError || llmFallbackNotice }}
+              engineState={{ loading: llmLoading, error: llmError, notice: llmFallbackNotice }}
               onRerun={runLlmAnalysis}
               offlineAnswer={(question) => buildOfflineSrsAnswer(question, llmResults.length ? llmResults : requirements.map((item) => ({
                 requirement_id: item.requirementId,

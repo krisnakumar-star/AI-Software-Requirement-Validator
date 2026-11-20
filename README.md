@@ -3,7 +3,7 @@
 A web application for managing and reviewing Software Requirements Specifications (SRS).
 All analysis is performed locally — **no cloud AI APIs, no AI-provider keys, no paid inference**.
 
-Architecture: React + Vite → Spring Boot (Java 21, MongoDB) → FastAPI analysis service (Python). Optional Qwen LLM runs inside the user's browser.
+Architecture: React + Vite → Spring Boot (Java 21, MongoDB) → FastAPI analysis service (Python). Optional SmolLM2-135M-Instruct language model runs inside the user's browser.
 
 ## Three separate AI capabilities
 
@@ -11,7 +11,7 @@ Architecture: React + Vite → Spring Boot (Java 21, MongoDB) → FastAPI analys
 |---|---|---|
 | **SRS analysis engine** (FastAPI) | Deterministic NLP + rules engine; runs automatically on the results page | No |
 | **Instant Offline Guide** | Rule-based answers about the report — not an LLM | No |
-| **Local AI Chat / Deep Review** | Real `onnx-community/Qwen2.5-0.5B-Instruct` generation in the browser (Transformers.js, ONNX Runtime, WebGPU → WASM fallback) | Yes, once (cached by the browser) |
+| **Local AI Chat / Deep Review** | Real `onnx-community/SmolLM2-135M-Instruct-ONNX-MHA` generation in the browser (Transformers.js, ONNX Runtime, WebGPU → WASM fallback) | Yes, once (cached by the browser; quantized ONNX weights are about 182 MB) |
 
 ## Analysis engine (`ai-service/srs_engine`)
 
@@ -49,4 +49,4 @@ cd frontend && npm install && npm run lint && npm run build
 
 ## Security
 
-Never commit API keys, database credentials, JWT secrets, or `.env` files. The browser talks only to Spring Boot; the local Qwen model sends nothing to any server.
+Never commit API keys, database credentials, JWT secrets, or `.env` files. The browser talks only to Spring Boot for application data; the local SmolLM2 model downloads public model files on first use and performs inference in the browser. Prompts are not sent to an AI inference API.

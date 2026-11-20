@@ -50,7 +50,7 @@ function MiniMarkdown({ text }) {
 function RequirementCard({ item }) {
   const [open, setOpen] = useState(false);
   const a = item.analysis || {};
-  const top = (a.detailed_findings || [])[0];
+  const top = (a.detailed_findings || [])[0] || (a.issues || []).slice(0, 1).map((message) => ({ message, recommendation: (a.suggestions || [])[0] || "Clarify the actor, expected behaviour and measurable acceptance criteria." }))[0];
   return (
     <article className="rw-card">
       <header className="rw-card-head">
@@ -76,9 +76,9 @@ function RequirementCard({ item }) {
           {(a.strengths || []).length > 0 && (
             <section><h5>Strengths</h5><ul>{a.strengths.map((s, i) => <li key={i}>{s.strength} <em>“{s.evidence}”</em></li>)}</ul></section>
           )}
-          {(a.detailed_findings || []).length > 0 && (
+          {((a.detailed_findings || []).length > 0 || (a.issues || []).length > 0) && (
             <section><h5>Problems identified</h5>
-              {a.detailed_findings.map((f, i) => (
+              {(a.detailed_findings || (a.issues || []).map((message) => ({ severity: "medium", title: "Validation finding", message, recommendation: (a.suggestions || [])[0] || "Clarify expected behaviour and add measurable acceptance criteria." }))).map((f, i) => (
                 <div key={i} className="rw-finding">
                   <div><span className={sevClass(f.severity)}>{f.severity}</span> <strong>{f.title}</strong> {f.evidence && f.evidence !== "—" && <code>{f.evidence}</code>}</div>
                   <p>{f.message}</p>

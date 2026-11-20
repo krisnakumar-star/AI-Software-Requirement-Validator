@@ -1,9 +1,9 @@
-// Optional local LLM: Qwen2.5-0.5B-Instruct running in the browser via Transformers.js
-// (ONNX Runtime, WebGPU with WASM/CPU fallback). No external inference API is used;
+// Lightweight local LLM: SmolLM2-135M-Instruct running in the browser via Transformers.js.
+// The smaller ONNX model is chosen for lower-memory demo devices. No external inference API is used;
 // the first load downloads model files, which the browser caches for later use.
 import { buildChatContext } from "./srsContext.js";
 
-export const MODEL_ID = "onnx-community/Qwen2.5-0.5B-Instruct";
+export const MODEL_ID = "onnx-community/SmolLM2-135M-Instruct-ONNX-MHA";
 const TRANSFORMERS_CDN = "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.2.0";
 
 export const CHAT_SYSTEM_PROMPT = `You are ReqValidator Local, a software requirements engineering assistant.
@@ -146,7 +146,7 @@ async function generate(messages, { maxNewTokens, onToken, onProgress }) {
   } catch (error) {
     const message = String(error?.message || error);
     if (/memory|allocation|OOM/i.test(message)) {
-      throw new Error("The device ran out of memory while running the local model. Close other tabs and retry.", { cause: error });
+      throw new Error("This device cannot allocate enough browser memory for the local model. Close other tabs and retry, or use the report and rule-based analysis without loading Local AI.", { cause: error });
     }
     throw error;
   } finally {

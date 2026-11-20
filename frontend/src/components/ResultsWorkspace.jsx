@@ -163,10 +163,39 @@ export default function ResultsWorkspace({ projectName, items, report, engineSta
   const [model, setModel] = useState({ status: "idle", message: "", percent: 0, device: null });
   const [review, setReview] = useState({ busy: false, text: "", error: "", selected: [] });
 
-  const summary = report?.executive_summary;
-  const findings = report?.project_findings;
   const sorted = [...items].sort((x, y) => (x.analysis?.quality_score ?? 0) - (y.analysis?.quality_score ?? 0));
   const shown = sorted.filter((i) => filter === "All" || i.analysis?.status === filter || (filter === "Critical" && i.analysis?.priority === "Critical"));
+  const scoreOf = (item) => Math.max(0, Math.min(100, Number(item.analysis?.quality_score) || 0));
+  const averageScore = items.length ? Math.round(items.reduce((sum, item) => sum + scoreOf(item), 0) / items.length) : 0;
+  const weakItems = sorted.filter((item) => scoreOf(item) < 70);
+  const issueTotal = items.reduce((sum, item) => sum + (item.analysis?.issues?.length || 0), 0);
+  const fallbackSummary = {
+    overall_score: averageScore,
+    risk_verdict: { level: averageScore >= 80 ? "Low" : averageScore >= 60 ? "Moderate" : "High", reason: "Calculated from the saved requirement quality scores." },
+    narrative: `The validation engine reviewed ${items.length} requirements and calculated an average quality score of ${averageScore}/100. It recorded ${issueTotal} issue(s). ${weakItems.length} requirement(s) scored below 70 and should be reviewed first.`,
+    critical_requirements: weakItems.slice(0, 5).map((item) => item.requirement_id),
+    main_risk_areas: [...new Set(weakItems.flatMap((item) => item.analysis?.issues || []))].slice(0, 5),
+    main_weaknesses: [...new Set(items.flatMap((item) => item.analysis?.issues || []))].slice(0, 5).map((issue) => ({ issue, percent: Math.round(items.filter((item) => (item.analysis?.issues || []).includes(issue)).length / Math.max(1, items.length) * 100) })),
+    top_recommendations: [
+      "Rewrite vague requirements with a clear actor, action, trigger and observable outcome.",
+      "Add measurable acceptance criteria and boundary conditions.",
+      "Specify permissions, error handling and expected behaviour for invalid inputs.",
+      "Review low-scoring requirements with the relevant stakeholder before approval."
+    ]
+  };
+  const summary = report?.executive_summary || fallbackSummary;
+  const fallbackFindings = {
+    contradictions: [], duplicates: [], dependencies: [], terminology: [],
+    missing_requirements: [], missing_information: [], security_gaps: [], performance_gaps: [],
+    coverage: { gaps: [] },
+    traceability: { generated_ids: items.map((item) => item.requirement_id), duplicate_ids: [], broken_references: [], matrix: [] }
+  };
+  const findings = report?.project_findings || fallbackFindings;
+  const dimensionAverages = ["clarity", "completeness", "testability"].reduce((acc, key) => {
+    const values = items.map((item) => item.analysis?.[key]).filter((value) => typeof value === "number");
+    acc[key] = values.length ? Math.round(values.reduce((a, b) => a + b, 0) / values.length) : averageScore;
+    return acc;
+  }, {});
 
   const loadModel = async () => {
     setModel({ status: "loading", message: "Preparing the local AI runtime…", percent: 0, device: null });
@@ -241,6 +270,7 @@ export default function ResultsWorkspace({ projectName, items, report, engineSta
 
       {engineState.loading && <div className="rw-info"><LoaderCircle size={15} className="rw-spin" /> Running the local SRS analysis engine…</div>}
       {engineState.error && <div className="rw-error"><AlertTriangle size={15} /> {engineState.error} <button type="button" className="rw-link" onClick={onRerun}>Retry</button></div>}
+      {engineState.notice && <div className="rw-info"><Zap size={15} /> {engineState.notice}</div>}
 
       {tab === "overview" && (
         summary ? (
@@ -266,12 +296,12 @@ export default function ResultsWorkspace({ projectName, items, report, engineSta
         </div>
       )}
 
-      {tab === "quality" && report && (
+      {tab === "quality" && (
         <div className="rw-grid">
-          <div className="rw-panel"><h3>Average dimension scores</h3>{Object.entries(report.quality_assessment.average_dimension_scores).map(([k, v]) => <Bar key={k} label={k} value={v} />)}</div>
-          <div className="rw-panel"><h3>Findings by severity</h3>{Object.entries(report.quality_assessment.severity_distribution).map(([k, v]) => <p key={k}><span className={sevClass(k)}>{k}</span> {v}</p>)}
-            <h3>Requirement types</h3>{Object.entries(report.quality_assessment.type_distribution).map(([k, v]) => <p key={k}>{k}: <b>{v}</b></p>)}</div>
-          <div className="rw-panel rw-span2"><h3>Categories covered</h3><div className="rw-filters">{Object.entries(report.quality_assessment.category_distribution).map(([k, v]) => <span key={k} className="rw-chip">{k} · {v}</span>)}</div>
+          <div className="rw-panel"><h3>Average dimension scores</h3>{Object.entries(report?.quality_assessment?.average_dimension_scores || dimensionAverages).map(([k, v]) => <Bar key={k} label={k} value={v} />)}</div>
+          <div className="rw-panel"><h3>Findings by severity</h3>{Object.entries(report?.quality_assessment?.severity_distribution || { high: weakItems.length, medium: issueTotal, low: Math.max(0, items.length - weakItems.length) }).map(([k, v]) => <p key={k}><span className={sevClass(k)}>{k}</span> {v}</p>)}
+            <h3>Requirement types</h3>{Object.entries(report?.quality_assessment?.type_distribution || { "Classified requirements": items.length }).map(([k, v]) => <p key={k}>{k}: <b>{v}</b></p>)}</div>
+          <div className="rw-panel rw-span2"><h3>Categories covered</h3><div className="rw-filters">{Object.entries(report?.quality_assessment?.category_distribution || { "Requirements reviewed": items.length }).map(([k, v]) => <span key={k} className="rw-chip">{k} · {v}</span>)}</div>
             {findings.coverage.gaps.length > 0 && <><h3>Coverage gaps</h3><ul>{findings.coverage.gaps.map((g) => <li key={g}>{g}</li>)}</ul></>}</div>
         </div>
       )}
@@ -297,12 +327,12 @@ export default function ResultsWorkspace({ projectName, items, report, engineSta
         </div>
       )}
 
-      {tab === "recommendations" && report && (
+      {tab === "recommendations" && (
         <div className="rw-stack">
           <div className="rw-panel"><h3>Prioritised improvement plan</h3>
-            {report.improvement_plan.map((s) => <div key={s.step} className="rw-finding"><b>{s.step}. {s.title}</b><p>{s.action}</p>{s.requirement_ids.length > 0 && <p className="rw-muted">Requirements: {s.requirement_ids.join(", ")}</p>}<p className="rw-muted">{s.rationale}</p></div>)}
+            {(report?.improvement_plan || summary.top_recommendations.map((action, index) => ({ step: index + 1, title: ["Clarify requirement behaviour", "Define measurable acceptance criteria", "Cover edge cases and failures", "Review low-scoring requirements"][index] || "Refine requirements", action, requirement_ids: weakItems.slice(0, 4).map((item) => item.requirement_id), rationale: "Recommended based on the saved validation scores and findings." }))).map((s) => <div key={s.step} className="rw-finding"><b>{s.step}. {s.title}</b><p>{s.action}</p>{s.requirement_ids?.length > 0 && <p className="rw-muted">Requirements: {s.requirement_ids.join(", ")}</p>}<p className="rw-muted">{s.rationale}</p></div>)}
           </div>
-          <div className="rw-panel"><h3>Risks</h3>{report.risks.map((r, i) => <div key={i} className="rw-finding"><span className={sevClass(r.level)}>{r.level}</span> <b>{r.risk}</b><p className="rw-muted">{r.impact} Mitigation: {r.mitigation}</p>{r.affected_requirements.length > 0 && <p className="rw-muted">{r.affected_requirements.join(", ")}</p>}</div>)}</div>
+          <div className="rw-panel"><h3>Risks</h3>{(report?.risks || (weakItems.length ? [{ level: "medium", risk: "Requirements may be ambiguous or insufficiently testable", impact: `${weakItems.length} requirement(s) scored below 70.`, mitigation: "Clarify behaviour and add verifiable acceptance criteria.", affected_requirements: weakItems.slice(0, 5).map((item) => item.requirement_id) }] : [])).map((r, i) => <div key={i} className="rw-finding"><span className={sevClass(r.level)}>{r.level}</span> <b>{r.risk}</b><p className="rw-muted">{r.impact} Mitigation: {r.mitigation}</p>{r.affected_requirements?.length > 0 && <p className="rw-muted">{r.affected_requirements.join(", ")}</p>}</div>)}</div>
         </div>
       )}
 

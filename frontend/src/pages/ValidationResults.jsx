@@ -21,41 +21,6 @@ import {
 import { apiUrl } from "../config/api";
 import ResultsWorkspace from "../components/ResultsWorkspace";
 
-function isValidAnalysisResponse(data) {
-  if (
-    !data ||
-    !Array.isArray(data.results) ||
-    data.results.length < 1 ||
-    data.total_requirements !== data.results.length
-  ) {
-    return false;
-  }
-
-  return data.results.every((result) => {
-    const analysis = result?.analysis;
-    return (
-      typeof result?.requirement === "string" &&
-      typeof analysis?.quality_score === "number" &&
-      Number.isInteger(analysis.quality_score) &&
-      analysis.quality_score >= 0 &&
-      analysis.quality_score <= 100 &&
-      [
-        "classification",
-        "clarity",
-        "completeness",
-        "testability",
-        "suggested_rewrite",
-        "explanation",
-      ].every((field) => typeof analysis[field] === "string") &&
-      ["ambiguities", "missing_information", "issues"].every(
-        (field) =>
-          Array.isArray(analysis[field]) &&
-          analysis[field].every((item) => typeof item === "string")
-      )
-    );
-  });
-}
-
 function buildOfflineSrsAnswer(question, items, metrics) {
   const q = String(question || '').toLowerCase();
   const records = Array.isArray(items) ? items : [];

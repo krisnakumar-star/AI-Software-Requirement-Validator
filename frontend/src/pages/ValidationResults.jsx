@@ -229,113 +229,77 @@ function ValidationResults() {
     };
   }, [projectId, navigate]);
 
+  // Build the detailed workspace from the validation data already stored by
+  // Spring Boot. This removes the fragile Render-to-FastAPI dependency from
+  // the results page; no remote AI provider is called here.
   const runLlmAnalysis = async () => {
-    const token = localStorage.getItem("token");
-
-    if (!token) {
-      navigate("/login");
-      return;
-    }
-
     setLlmLoading(true);
     setLlmError("");
     setLlmFallbackNotice("");
 
     try {
-      const response = await fetch(
-        apiUrl(`/api/llm/analyze/project/${encodeURIComponent(projectId)}`),
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
-
-      const responseText = await response.text();
-      let data = {};
-
-      try {
-        data = responseText ? JSON.parse(responseText) : {};
-      } catch {
-        data = { message: responseText };
-      }
-
-      if (!response.ok) {
-        throw new Error(
-          data.message || "Unable to run AI analysis."
-        );
-      }
-
-      if (!isValidAnalysisResponse(data)) {
-        throw new Error(
-          "The AI service returned an incomplete or invalid analysis response. Please retry."
-        );
-      }
-
-      setLlmAnalysis(data);
-    } catch (err) {
-      console.error("AI analysis error:", err);
-
-      // Keep the results page useful when the hosted FastAPI service is sleeping
-      // or temporarily unavailable. Reuse only analysis already saved by the backend.
-      const savedResults = requirements
-        .filter((item) => item.requirementText && item.aiAnalysis)
-        .map((item) => {
-          const saved = item.aiAnalysis || {};
-          const asText = (value) => typeof value === "string" ? value : "";
-          const asList = (value) => Array.isArray(value)
-            ? value.filter((entry) => typeof entry === "string")
+      const records = requirements
+        .filter((item) => item.requirementText)
+        .map((item, index) => {
+          const score = Number(item.qualityScore);
+          const issues = Array.isArray(item.issues)
+            ? item.issues.filter((entry) => typeof entry === "string")
             : [];
+          const suggestions = Array.isArray(item.suggestions)
+            ? item.suggestions.filter((entry) => typeof entry === "string")
+            : [];
+          const textValue = (value, fallback = "Not assessed") =>
+            typeof value === "string" && value.trim() ? value : fallback;
+
           return {
-            requirement_id: item.requirementId,
+            requirement_id: item.requirementId || `REQ-${String(index + 1).padStart(3, "0")}`,
             requirement: item.requirementText,
             analysis: {
-              quality_score: Number.isInteger(saved.quality_score)
-                ? saved.quality_score
-                : Math.max(0, Math.min(100, Number(item.qualityScore) || 0)),
-              classification: asText(saved.classification) || asText(item.classification) || "Previously saved analysis",
-              clarity: asText(saved.clarity) || asText(item.clarity),
-              completeness: asText(saved.completeness) || asText(item.completeness),
-              testability: asText(saved.testability) || asText(item.testability),
-              suggested_rewrite: asText(saved.suggested_rewrite),
-              explanation: asText(saved.explanation) || "Showing the analysis previously saved for this requirement. The live analysis service could not be reached.",
-              ambiguities: asList(saved.ambiguities),
-              missing_information: asList(saved.missing_information),
-              issues: asList(saved.issues).length ? asList(saved.issues) : asList(item.issues),
+              quality_score: Number.isFinite(score)
+                ? Math.max(0, Math.min(100, Math.round(score)))
+                : Math.max(0, Math.min(100, Math.round(Number(summary?.averageScore) || 0))),
+              classification: textValue(item.classification, "Requirement"),
+              clarity: textValue(item.clarity),
+              completeness: textValue(item.completeness),
+              testability: textValue(item.testability),
+              suggested_rewrite: suggestions[0] || "",
+              explanation: issues.length
+                ? `The existing validation engine flagged: ${issues.join("; ")}`
+                : "No issue details were recorded by the existing validation engine. Review the requirement against its stated business rules.",
+              ambiguities: [],
+              missing_information: [],
+              issues,
             },
           };
         });
 
-      if (savedResults.length > 0) {
-        setLlmAnalysis({
-          status: "saved-fallback",
-          total_requirements: savedResults.length,
-          results: savedResults,
-        });
-        setLlmFallbackNotice(
-          "The analysis service is temporarily unavailable. Showing the previously saved analysis instead."
-        );
-        setLlmError("");
-      } else {
-        setLlmError(
-          err.message === "Failed to fetch"
-            ? "Cannot connect to the analysis service. Check that the backend and FastAPI service are running."
-            : err.message || "The detailed analysis could not be completed."
-        );
+      if (!records.length) {
+        throw new Error("No requirement records are available for detailed review.");
       }
+
+      setLlmAnalysis({
+        status: "existing-validation-data",
+        provider: "ReqValidator validation engine",
+        total_requirements: records.length,
+        results: records,
+      });
+      setLlmFallbackNotice(
+        "Showing the existing requirement validation results. The separate hosted AI service is not required for this workspace."
+      );
+    } catch (err) {
+      setLlmError(err.message || "Unable to prepare the analysis workspace.");
     } finally {
       setLlmLoading(false);
     }
   };
 
-  // Run the local SRS engine automatically after validation (no external AI service involved).
+  // Prepare the workspace locally once the validation data has loaded.
   useEffect(() => {
-    if (summary && !autoAnalysisStarted.current) {
+    if (summary && requirements.length > 0 && !autoAnalysisStarted.current) {
       autoAnalysisStarted.current = true;
       runLlmAnalysis();
     }
-  }, [summary]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [summary, requirements]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const getStatusClass = (status) => {
     const normalized = (status || "").toUpperCase();
